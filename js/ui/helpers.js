@@ -661,14 +661,15 @@ window.DiaconiaUI = (() => {
    * Campo de senha com botão para mostrar/ocultar.
    * extraAttrs: ex. { name: "senha", autocomplete: "current-password", required: true }
    */
-  function passwordFieldHtml({ id, placeholder = "", className = "", extraAttrs = {} } = {}) {
+  function passwordFieldHtml({ id, placeholder = "", className = "", value = "", extraAttrs = {} } = {}) {
     const idAttr = id ? ` id="${esc(id)}"` : "";
+    const valAttr = value != null && value !== "" ? ` value="${esc(String(value))}"` : "";
     const extra = Object.entries(extraAttrs)
       .filter(([, v]) => v != null && v !== false)
       .map(([k, v]) => (v === true ? k : `${k}="${esc(String(v))}"`))
       .join(" ");
     return `<div class="input-password">
-      <input type="password"${idAttr} class="${esc(className || "input")}" placeholder="${esc(placeholder)}" ${extra}/>
+      <input type="password"${idAttr} class="${esc(className || "input")}" placeholder="${esc(placeholder)}"${valAttr} ${extra}/>
       <button type="button" class="btn-password-toggle" data-act="toggle-password" title="Mostrar senha" aria-label="Mostrar senha">${icon("eye")}</button>
     </div>`;
   }

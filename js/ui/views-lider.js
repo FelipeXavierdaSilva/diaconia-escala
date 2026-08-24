@@ -37,10 +37,10 @@ window.DiaconiaViewsLider = (() => {
         );
         return;
       }
-      UI().toast(`Abrindo WhatsApp de ${wa.nome || "o destinatário"} com login e senha…`);
+      UI().toast(`Mensagem copiada — use o painel para abrir o WhatsApp Web.`);
       return;
     }
-    UI().toast(wa.erro || "WhatsApp não enviado — cadastre o número.");
+    UI().toast(wa.erro || "WhatsApp não enviado — cadastre o número com DDD (ex.: 47997845287).");
   }
 
   function whatsappDoUsuario(state, usuario) {
@@ -2047,13 +2047,21 @@ window.DiaconiaViewsLider = (() => {
         <input id="u-whatsapp" inputmode="tel" value="${UI().esc(waInicial)}" placeholder="Ex.: 5511999990000"/>
       </label>
       <p class="muted" style="font-size:12px;margin:-6px 0 12px" id="u-wa-hint">${usuario ? "Usado para contato e compartilhar login/senha." : "Ao criar, abriremos o WhatsApp com login e senha (se o número estiver preenchido)."}</p>
-      <label class="field"><span>Senha ${usuario ? "(deixe em branco para manter)" : ""}</span>
+      <label class="field"><span>Senha</span>
         ${UI().passwordFieldHtml({
           id: "u-senha",
-          placeholder: usuario ? "••••••••" : "Defina uma senha",
+          value: usuario?.senha || "",
+          placeholder: usuario ? "Sem senha definida" : "Defina uma senha",
           extraAttrs: { autocomplete: "new-password" },
         })}
       </label>
+      ${
+        usuario?.senha
+          ? `<p class="muted" style="font-size:12px;margin:-6px 0 12px">Senha salva no cadastro. Clique no ícone do olho para visualizar.</p>`
+          : usuario
+            ? `<p class="muted" style="font-size:12px;margin:-6px 0 12px">Nenhuma senha cadastrada — defina uma abaixo.</p>`
+            : ""
+      }
       <label class="field"><span>Papel</span>
         <select id="u-papel" class="select">
           <option value="lider" ${usuario?.papel === "lider" ? "selected" : ""}>Liderança</option>
@@ -2146,8 +2154,10 @@ window.DiaconiaViewsLider = (() => {
         usuario.papel = papel;
         if (senha) {
           usuario.senha = senha;
-          window.DiaconiaStorage.touchUsuario?.(usuario);
+        } else if (!usuario.senha) {
+          return UI().toast("Defina uma senha para este usuário.");
         }
+        window.DiaconiaStorage.touchUsuario?.(usuario);
         if (papel === "lider") {
           syncLiderDeUsuario(state, usuario, whatsapp);
           usuario.diaconoId = null;
@@ -2387,7 +2397,7 @@ window.DiaconiaViewsLider = (() => {
       <div class="panel" style="margin-top:16px">
         <h2>WhatsApp (avisos e trocas)</h2>
         <p class="muted" style="margin-top:-4px">
-          Hoje: modo <strong>manual</strong> (abre o WhatsApp no navegador).
+          Hoje: modo <strong>manual</strong> (painel + WhatsApp Web — recomendado no PC).
           Futuro: modo <strong>API</strong> envia pelo servidor sem intervenção.
         </p>
         <p class="muted" style="font-size:13px">

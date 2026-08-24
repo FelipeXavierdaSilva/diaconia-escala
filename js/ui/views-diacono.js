@@ -936,7 +936,7 @@ window.DiaconiaViewsDiacono = (() => {
                 : `Pedido criado. WhatsApp enviado para ${wa.nome || "o destinatário"}.`
             );
           } else {
-            UI().toast(`Pedido criado. Abrindo WhatsApp de ${wa.nome || "o destinatário"}…`);
+            UI().toast(`Pedido criado. Mensagem copiada — use o painel para abrir o WhatsApp Web.`);
           }
         } else if (wa && !wa.ignorado) {
           UI().toast(`Pedido criado no portal. ${wa.erro || "WhatsApp não enviado."}`);
