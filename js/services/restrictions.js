@@ -119,7 +119,15 @@ window.DiaconiaRestrictions = (() => {
       }
     }
 
-    return { ok: true, restricao: r };
+    let whatsapp = null;
+    if (
+      (status === "aprovada" || status === "rejeitada") &&
+      typeof window.DiaconiaWhatsApp?.notificarStatusRestricao === "function"
+    ) {
+      whatsapp = window.DiaconiaWhatsApp.notificarStatusRestricao(state, r, { status });
+    }
+
+    return { ok: true, restricao: r, whatsapp };
   }
 
   function atualizar(state, restricaoId, payload, sessao) {

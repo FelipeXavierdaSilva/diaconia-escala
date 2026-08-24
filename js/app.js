@@ -15,6 +15,10 @@ window.DiaconiaApp = (() => {
       window.DiaconiaStorage.save(this.state);
     },
 
+    async saveAndSync() {
+      return window.DiaconiaStorage.saveAndSync(this.state);
+    },
+
     setMes(ano, mes) {
       this.ano = ano;
       this.mes = mes;
@@ -94,12 +98,14 @@ window.DiaconiaApp = (() => {
             <p class="lead">Central mensal da escala do diaconato — planejar, gerar e consultar com clareza.</p>
             <form id="login-form">
               <label class="field"><span>Login</span><input name="login" autocomplete="username" required placeholder="Seu usuário"/></label>
-              <label class="field"><span>Senha</span><input name="senha" type="password" autocomplete="current-password" required placeholder="••••••••"/></label>
+              <label class="field"><span>Senha</span>${UI.passwordFieldHtml({ placeholder: "••••••••", extraAttrs: { name: "senha", autocomplete: "current-password", required: true } })}</label>
               <button class="btn btn-primary btn-block" type="submit">Entrar</button>
               <p id="login-erro" class="alert alert-danger hidden" style="margin-top:12px"></p>
             </form>
           </div>
         </div>`;
+
+      UI.bindPasswordToggles(root);
 
       root.querySelector("#login-form").addEventListener("submit", (e) => {
         e.preventDefault();

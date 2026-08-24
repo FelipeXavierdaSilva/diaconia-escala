@@ -264,6 +264,7 @@ window.DiaconiaViewsDiacono = (() => {
     const rowsRest = minhasRest
       .map(
         (r) => `<tr class="no-click">
+        ${UI().bulkTd(r.id, "avisos-rest-diacono")}
         <td>${UI().esc(Cal().formatBR(r.data))}</td>
         <td>${UI().esc(tipoRest[r.tipo] || r.tipo)}</td>
         <td>${UI().esc(r.observacao || "—")}</td>
@@ -281,6 +282,7 @@ window.DiaconiaViewsDiacono = (() => {
             : `<span class="badge badge-ok">Troca</span>`;
         const seta = t.modalidade === "cobertura" ? "← cobre" : "↔";
         return `<tr class="no-click">
+          ${UI().bulkTd(t.id, "avisos-troca-diacono")}
           <td>${UI().esc(Cal().formatBR(t.data))}</td>
           <td>${tipo}</td>
           <td>${UI().esc(UI().nomeDiacono(state, t.deDiaconoId))} ${seta} ${UI().esc(UI().nomeDiacono(state, t.paraDiaconoId))}</td>
@@ -318,9 +320,10 @@ window.DiaconiaViewsDiacono = (() => {
 
       <div class="panel" style="margin-bottom:16px">
         <div class="panel-head"><h2>Quando não posso servir</h2></div>
-        <div class="table-wrap"><table class="data">
-          <thead><tr><th>Data</th><th>Motivo</th><th>Obs.</th><th>Status</th><th></th></tr></thead>
-          <tbody>${rowsRest || `<tr class="no-click"><td colspan="5" class="empty">Nenhum aviso enviado.</td></tr>`}</tbody>
+        ${UI().bulkBar("avisos-rest-diacono")}
+        <div class="table-wrap"><table class="data" data-bulk-table="avisos-rest-diacono">
+          <thead><tr>${UI().bulkTh("avisos-rest-diacono")}<th>Data</th><th>Motivo</th><th>Obs.</th><th>Status</th><th></th></tr></thead>
+          <tbody>${rowsRest || `<tr class="no-click"><td colspan="6" class="empty">Nenhum aviso enviado.</td></tr>`}</tbody>
         </table></div>
       </div>
 
@@ -330,9 +333,10 @@ window.DiaconiaViewsDiacono = (() => {
           <strong>Cobertura</strong> = alguém assume no seu lugar.
           <strong>Troca</strong> = vocês permutam funções.
         </p>
-        <div class="table-wrap"><table class="data">
-          <thead><tr><th>Data</th><th>Tipo</th><th>Pessoas</th><th>Função</th><th>Status</th><th></th></tr></thead>
-          <tbody>${rowsTroca || `<tr class="no-click"><td colspan="6" class="empty">Nenhum pedido.</td></tr>`}</tbody>
+        ${UI().bulkBar("avisos-troca-diacono")}
+        <div class="table-wrap"><table class="data" data-bulk-table="avisos-troca-diacono">
+          <thead><tr>${UI().bulkTh("avisos-troca-diacono")}<th>Data</th><th>Tipo</th><th>Pessoas</th><th>Função</th><th>Status</th><th></th></tr></thead>
+          <tbody>${rowsTroca || `<tr class="no-click"><td colspan="7" class="empty">Nenhum pedido.</td></tr>`}</tbody>
         </table></div>
       </div>
 
@@ -421,6 +425,33 @@ window.DiaconiaViewsDiacono = (() => {
         app.render();
         UI().toast("Pedido excluído.");
       });
+    });
+
+    const sessao = window.DiaconiaAuth.sessao();
+    UI().bindBulkTable(root, "avisos-rest-diacono", {
+      itemLabel: "aviso(s)",
+      onDelete: async (ids) => {
+        for (const id of ids) {
+          window.DiaconiaRestrictions.excluir(state, id, sessao);
+        }
+        app.save();
+        app.render();
+        UI().toast(`${ids.length} aviso(s) excluído(s).`);
+      },
+    });
+
+    UI().bindBulkTable(root, "avisos-troca-diacono", {
+      itemLabel: "pedido(s)",
+      onDelete: async (ids) => {
+        let n = 0;
+        for (const id of ids) {
+          const res = window.DiaconiaSwaps.excluir(state, id, sessao);
+          if (res.ok) n += 1;
+        }
+        app.save();
+        app.render();
+        UI().toast(n ? `${n} pedido(s) excluído(s).` : "Nenhum pedido pôde ser excluído.");
+      },
     });
   }
 
@@ -1012,7 +1043,7 @@ window.DiaconiaViewsDiacono = (() => {
           <p><strong>Login:</strong> <code>${UI().esc(u?.login || "")}</code>
             <span class="muted" style="font-size:12px"> — não altera</span></p>
           <label class="field"><span>Nova senha</span>
-            <input type="password" id="p-senha" class="input" placeholder="Deixe em branco para manter"/>
+            ${UI().passwordFieldHtml({ id: "p-senha", className: "input", placeholder: "Deixe em branco para manter" })}
           </label>
           <button class="btn btn-accent" id="btn-save-perfil">Salvar meus dados</button>
         </div>
@@ -1026,8 +1057,9 @@ window.DiaconiaViewsDiacono = (() => {
 
   function bindConta(app, root) {
     UI().bindDadosPessoaisForm(root, "p");
+    UI().bindPasswordToggles(root);
 
-    root.querySelector("#btn-save-perfil")?.addEventListener("click", () => {
+    root.querySelector("#btn-save-perfil")?.addEventListener("click", async () => {
       const { state } = app;
       const sessao = window.DiaconiaAuth.sessao();
       const d = state.diaconos.find((x) => x.id === sessao?.diaconoId);
@@ -1043,7 +1075,10 @@ window.DiaconiaViewsDiacono = (() => {
 
       if (u) {
         u.nome = dados.nome;
-        if (senha) u.senha = senha;
+        if (senha) {
+          u.senha = senha;
+          window.DiaconiaStorage.touchUsuario?.(u);
+        }
       }
 
       if (typeof window.DiaconiaAuth.atualizarSessao === "function") {
@@ -1059,9 +1094,15 @@ window.DiaconiaViewsDiacono = (() => {
         meta: { diaconoId: d.id },
       });
 
-      app.save();
+      const sync = await app.saveAndSync();
       app.render();
-      UI().toast(senha ? "Dados e senha salvos." : "Dados salvos. A liderança já vê as alterações.");
+      if (senha && sync?.ok) {
+        UI().toast("Dados e senha salvos no servidor.");
+      } else if (senha && !sync?.ok) {
+        UI().toast("Salvo neste aparelho — senha ainda não confirmou no servidor.");
+      } else {
+        UI().toast("Dados salvos.");
+      }
     });
   }
 

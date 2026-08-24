@@ -17,6 +17,45 @@ window.DiaconiaStorage = (() => {
     state.meta.atualizadoEm = new Date().toISOString();
   }
 
+  /** Mescla listas de usuários — cada conta fica com a versão mais recente (senha, etc.). */
+  function mergeUsuarioLists(localUsers, remoteUsers) {
+    const map = new Map((remoteUsers || []).map((u) => [u.id, u]));
+    for (const lu of localUsers || []) {
+      const ru = map.get(lu.id);
+      if (!ru) {
+        map.set(lu.id, lu);
+        continue;
+      }
+      const lt = lu.atualizadoEm || "";
+      const rt = ru.atualizadoEm || "";
+      map.set(lu.id, lt >= rt ? lu : ru);
+    }
+    return [...map.values()];
+  }
+
+  function mergeStates(local, remote) {
+    if (!remote) return local;
+    if (!local) return remote;
+    const localTs = local.meta?.atualizadoEm || "";
+    const remoteTs = remote.meta?.atualizadoEm || "";
+    const base = remoteTs > localTs ? { ...local, ...remote } : { ...remote, ...local };
+    base.usuarios = mergeUsuarioLists(local.usuarios, remote.usuarios);
+    if (local.lideres && remote.lideres) {
+      const byId = new Map(remote.lideres.map((l) => [l.id, l]));
+      for (const l of local.lideres) {
+        const r = byId.get(l.id);
+        if (!r || (l.atualizadoEm || "") >= (r.atualizadoEm || "")) byId.set(l.id, l);
+      }
+      base.lideres = [...byId.values()];
+    }
+    return base;
+  }
+
+  function touchUsuario(usuario) {
+    if (!usuario) return;
+    usuario.atualizadoEm = new Date().toISOString();
+  }
+
   function load() {
     try {
       const raw = localStorage.getItem(KEY);
@@ -116,6 +155,42 @@ window.DiaconiaStorage = (() => {
       if (u.whatsapp === undefined) u.whatsapp = "";
     }
 
+    // Diácono sem perfil vinculado → cria cadastro mínimo automaticamente
+    if (!state.meta.perfilDiaconoAuto) {
+      const eqPadrao =
+        (state.equipes || []).find((e) => e.ativa !== false)?.id || "eq01";
+      const uid = (p) =>
+        typeof window.DiaconiaEngine?.uid === "function"
+          ? window.DiaconiaEngine.uid(p)
+          : `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      for (const u of state.usuarios || []) {
+        if (u.papel !== "diacono" || u.diaconoId) continue;
+        const wa = String(u.whatsapp || "").replace(/\D/g, "");
+        const id = uid("d");
+        state.diaconos.push({
+          id,
+          nome: u.nome,
+          equipeId: eqPadrao,
+          funcaoMinisterio: "",
+          funcaoDiaconatoId: "",
+          whatsapp: wa,
+          restricaoPessoal: "",
+          casado: false,
+          conjugeNome: "",
+          conjugeMembroIgreja: false,
+          temFilhos: false,
+          qtdFilhos: 0,
+          filhos: [],
+          filhosNomes: [],
+          filhosVaoIgreja: false,
+          funcoesPermitidas: ["*"],
+          ativo: true,
+        });
+        u.diaconoId = id;
+      }
+      state.meta.perfilDiaconoAuto = true;
+    }
+
     // Líderes: vínculo com conta de usuário + sincronizar liderança
     for (const l of state.lideres || []) {
       if (l.usuarioId === undefined) l.usuarioId = null;
@@ -192,8 +267,10 @@ window.DiaconiaStorage = (() => {
         modo: "manual",
         abrirNoNavegador: true,
         notificarPedidoTroca: true,
+        notificarRespostaTroca: true,
         notificarCadastroUsuario: true,
-        notificarRestricao: false,
+        notificarRestricao: true,
+        notificarStatusRestricao: true,
         notificarEscalaGerada: false,
         portalBaseUrl: "",
         apiUrl: "",
@@ -240,17 +317,21 @@ window.DiaconiaStorage = (() => {
     const localTs = local?.meta?.atualizadoEm || "";
 
     if (!local || remoteTs > localTs) {
-      migrate(remote.state);
-      localStorage.setItem(KEY, JSON.stringify(remote.state));
-      return { ok: true, updated: true, state: remote.state };
+      let mergedState = remote.state;
+      if (local) {
+        mergedState = mergeStates(local, remote.state);
+      }
+      migrate(mergedState);
+      localStorage.setItem(KEY, JSON.stringify(mergedState));
+      return { ok: true, updated: true, state: mergedState };
     }
 
     return { ok: true, updated: false, state: local };
   }
 
-  async function pushRemote() {
+  async function pushRemote(opts = {}) {
     const state = load();
-    if (!state || !SYNC_ENABLED) return { ok: false };
+    if (!state || !SYNC_ENABLED) return { ok: false, offline: !SYNC_ENABLED };
 
     try {
       const res = await fetch("/api/state", {
@@ -258,17 +339,33 @@ window.DiaconiaStorage = (() => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ state }),
       });
-      if (!res.ok) return { ok: false };
+      if (!res.ok) return { ok: false, status: res.status };
       const data = await res.json();
       if (data.reason === "stale" && data.state) {
+        const merged = mergeStates(state, data.state);
+        migrate(merged);
+        touchMeta(merged);
+        localStorage.setItem(KEY, JSON.stringify(merged));
+        if (!opts._retried) {
+          return pushRemote({ _retried: true });
+        }
+        return { ok: true, stale: true, state: merged };
+      }
+      if (data.state) {
         migrate(data.state);
         localStorage.setItem(KEY, JSON.stringify(data.state));
-        return { ok: true, stale: true, state: data.state };
       }
       return { ok: true, state: data.state || state };
     } catch {
-      return { ok: false };
+      return { ok: false, network: true };
     }
+  }
+
+  /** Salva localmente e aguarda envio ao servidor (senha, usuários, etc.). */
+  async function saveAndSync(state) {
+    save(state, { skipPush: true });
+    const result = await pushRemote();
+    return result;
   }
 
   async function getOrInitAsync() {
@@ -449,6 +546,9 @@ window.DiaconiaStorage = (() => {
     getOrInitAsync,
     pullRemote,
     pushRemote,
+    saveAndSync,
+    mergeUsuarioLists,
+    touchUsuario,
     startSync,
     buildBackup,
     downloadBackup,

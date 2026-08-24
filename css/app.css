@@ -488,6 +488,47 @@ code {
   transform: none;
 }
 
+.input-password {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-password .input,
+.input-password input {
+  width: 100%;
+  padding-right: 44px;
+}
+
+.input-password .btn-password-toggle {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.input-password .btn-password-toggle:hover {
+  color: var(--teal);
+  background: color-mix(in srgb, var(--teal) 8%, transparent);
+}
+
+.input-password .btn-password-toggle svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
 td .toolbar,
 td.toolbar {
   gap: 6px;
@@ -695,6 +736,44 @@ table.data tbody tr.no-click {
 }
 .dot-muted {
   background: #9aadb4;
+}
+
+/* —— Seleção em massa (tabelas) —— */
+.col-bulk {
+  width: 40px;
+  text-align: center;
+  vertical-align: middle;
+  padding-left: 8px !important;
+  padding-right: 4px !important;
+}
+
+.col-bulk input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--teal);
+}
+
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  background: var(--surface-2, #f4f8f9);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.bulk-bar.hidden {
+  display: none;
+}
+
+.bulk-bar-count {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--teal);
 }
 
 /* —— Calendar —— */

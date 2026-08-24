@@ -93,6 +93,57 @@ window.DiaconiaViewsLider = (() => {
     if (d) d.whatsapp = wa;
   }
 
+  function equipePadrao(state) {
+    const eq = (state.equipes || []).find((e) => e.ativa !== false);
+    return eq?.id || "eq01";
+  }
+
+  /** Cria perfil mínimo de diácono — equipe/funções configuradas depois em Diáconos */
+  function criarDiaconoMinimo(state, { nome, whatsapp = "" }) {
+    const diacono = {
+      id: Engine().uid("d"),
+      nome,
+      equipeId: equipePadrao(state),
+      funcaoMinisterio: "",
+      funcaoDiaconatoId: "",
+      whatsapp: String(whatsapp || "").replace(/\D/g, ""),
+      restricaoPessoal: "",
+      casado: false,
+      conjugeNome: "",
+      conjugeMembroIgreja: false,
+      temFilhos: false,
+      qtdFilhos: 0,
+      filhos: [],
+      filhosNomes: [],
+      filhosVaoIgreja: false,
+      funcoesPermitidas: ["*"],
+      ativo: true,
+    };
+    state.diaconos.push(diacono);
+    return diacono;
+  }
+
+  function garantirPerfilDiacono(state, usuario, { nome, whatsapp }, usuarioLogId) {
+    if (usuario.papel !== "diacono") {
+      usuario.diaconoId = null;
+      return null;
+    }
+    let d = usuario.diaconoId ? state.diaconos.find((x) => x.id === usuario.diaconoId) : null;
+    if (!d) {
+      d = criarDiaconoMinimo(state, { nome, whatsapp });
+      usuario.diaconoId = d.id;
+      window.DiaconiaHistory.add(state, {
+        tipo: "diacono",
+        mensagem: `Perfil de diácono criado para ${nome} — configure equipe e funções em Diáconos.`,
+        usuarioId: usuarioLogId,
+      });
+    } else {
+      d.nome = nome;
+      if (whatsapp) d.whatsapp = whatsapp;
+    }
+    return d;
+  }
+
   /* ——— Escalas ——— */
   function escalas(app) {
     const { state, ano, mes } = ctx(app);
@@ -106,6 +157,7 @@ window.DiaconiaViewsLider = (() => {
         const sEq = eqId ? Engine().statusEquipe(esc, eqId, state) : "vazia";
         const tom = sEq === "completa" ? "ok" : sEq === "vazia" ? "muted" : "warn";
         return `<tr data-data="${esc.data}">
+          ${UI().bulkTd(esc.data, "escalas-lista")}
           <td>${UI().esc(Cal().formatBRCurto(esc.data))}<div class="muted" style="font-size:12px">${UI().esc(Cal().diaSemana(esc.data))}</div></td>
           <td>${UI().esc(esc.nome)}</td>
           <td><span class="badge badge-${tom}">${UI().esc(eqId ? UI().nomeEquipe(state, eqId) : "—")}</span></td>
@@ -164,10 +216,11 @@ window.DiaconiaViewsLider = (() => {
       <div class="escalas-body">
         <div class="panel panel-lista" data-pane="lista">
           <div class="panel-head"><h2>Visão mensal</h2></div>
+          ${UI().bulkBar("escalas-lista")}
           <div class="table-wrap table-fit">
-            <table class="data">
-              <thead><tr><th>Data</th><th>Evento</th><th>Equipe do dia</th><th>Status</th><th>Ações</th></tr></thead>
-              <tbody id="tbl-escalas">${rows || `<tr class="no-click"><td colspan="5" class="empty">Nenhuma escala neste mês.</td></tr>`}</tbody>
+            <table class="data" data-bulk-table="escalas-lista">
+              <thead><tr>${UI().bulkTh("escalas-lista")}<th>Data</th><th>Evento</th><th>Equipe do dia</th><th>Status</th><th>Ações</th></tr></thead>
+              <tbody id="tbl-escalas">${rows || `<tr class="no-click"><td colspan="6" class="empty">Nenhuma escala neste mês.</td></tr>`}</tbody>
             </table>
           </div>
         </div>
@@ -231,7 +284,7 @@ window.DiaconiaViewsLider = (() => {
         return;
       }
       const tr = e.target.closest("tr[data-data]");
-      if (tr) openDay(tr.dataset.data);
+      if (tr && !e.target.closest(".col-bulk")) openDay(tr.dataset.data);
     });
     root.querySelectorAll(".cal-day[data-data]").forEach((el) => {
       el.addEventListener("click", () => openDay(el.dataset.data));
@@ -251,6 +304,21 @@ window.DiaconiaViewsLider = (() => {
       tab.addEventListener("click", () => setView(tab.dataset.view));
     });
     setView("cal");
+
+    UI().bindBulkTable(root, "escalas-lista", {
+      itemLabel: "escala(s)",
+      onDelete: async (ids) => {
+        for (const data of ids) delete state.escalas[data];
+        window.DiaconiaHistory.add(state, {
+          tipo: "escala",
+          mensagem: `${ids.length} escala(s) excluída(s) em massa.`,
+          usuarioId: ctx(app).sessao()?.usuarioId,
+        });
+        app.save();
+        app.render();
+        UI().toast(`${ids.length} escala(s) excluída(s).`);
+      },
+    });
   }
 
   function periodoGeracaoLabel(ano, mes, qtd) {
@@ -529,6 +597,7 @@ window.DiaconiaViewsLider = (() => {
           : "";
         const familia = UI().resumoFamiliaCurto(d);
         return `<tr class="no-click" data-id="${d.id}">
+        ${UI().bulkTd(d.id, "diaconos")}
         <td>${UI().esc(d.nome)}${parceiro ? `<div class="muted" style="font-size:12px">💑 ${UI().esc(parceiro)}</div>` : ""}</td>
         <td>${UI().esc(UI().nomeEquipe(state, d.equipeId))}</td>
         <td>${ministerio ? UI().esc(ministerio) : `<span class="muted">—</span>`}</td>
@@ -568,10 +637,11 @@ window.DiaconiaViewsLider = (() => {
         </div>
       </div>
       <div class="panel">
+        ${UI().bulkBar("diaconos")}
         <div class="table-wrap">
-          <table class="data">
-            <thead><tr><th>Nome</th><th>Equipe</th><th>Ministério</th><th>Diaconato</th><th>Família</th><th>WA</th><th>Status</th><th>Ação</th></tr></thead>
-            <tbody>${rows || `<tr class="no-click"><td colspan="8" class="empty">Nenhum diácono neste filtro.</td></tr>`}</tbody>
+          <table class="data" data-bulk-table="diaconos">
+            <thead><tr>${UI().bulkTh("diaconos")}<th>Nome</th><th>Equipe</th><th>Ministério</th><th>Diaconato</th><th>Família</th><th>WA</th><th>Status</th><th>Ação</th></tr></thead>
+            <tbody>${rows || `<tr class="no-click"><td colspan="9" class="empty">Nenhum diácono neste filtro.</td></tr>`}</tbody>
           </table>
         </div>
       </div>`;
@@ -642,6 +712,21 @@ window.DiaconiaViewsLider = (() => {
         const d = state.diaconos.find((x) => x.id === btn.dataset.id);
         confirmarExclusaoDiacono(app, d);
       });
+    });
+
+    UI().bindBulkTable(root, "diaconos", {
+      itemLabel: "diácono(s)",
+      onDelete: async (ids) => {
+        for (const id of ids) removerDiaconoDoEstado(state, id);
+        window.DiaconiaHistory.add(state, {
+          tipo: "diacono",
+          mensagem: `${ids.length} diácono(s) excluído(s) em massa.`,
+          usuarioId: ctx(app).sessao()?.usuarioId,
+        });
+        app.save();
+        app.render();
+        UI().toast(`${ids.length} diácono(s) excluído(s).`);
+      },
     });
   }
 
@@ -966,6 +1051,7 @@ window.DiaconiaViewsLider = (() => {
             ? "Mesmo dia (funções livres)"
             : "Sem preferência de dia";
         return `<tr class="no-click">
+          ${UI().bulkTd(c.id, "casais")}
           <td><strong>${UI().esc(Engine().nomeCasal(state, c))}</strong>
             ${c.observacao ? `<div class="muted" style="font-size:12px">${UI().esc(c.observacao)}</div>` : ""}
           </td>
@@ -993,9 +1079,10 @@ window.DiaconiaViewsLider = (() => {
         Restrições e vagas sempre têm prioridade.
       </div>
       <div class="panel">
-        <div class="table-wrap"><table class="data">
-          <thead><tr><th>Casal</th><th>Preferência</th><th>Status</th><th>Ações</th></tr></thead>
-          <tbody>${rows || `<tr class="no-click"><td colspan="4" class="empty">Nenhum casal cadastrado.</td></tr>`}</tbody>
+        ${UI().bulkBar("casais")}
+        <div class="table-wrap"><table class="data" data-bulk-table="casais">
+          <thead><tr>${UI().bulkTh("casais")}<th>Casal</th><th>Preferência</th><th>Status</th><th>Ações</th></tr></thead>
+          <tbody>${rows || `<tr class="no-click"><td colspan="5" class="empty">Nenhum casal cadastrado.</td></tr>`}</tbody>
         </table></div>
       </div>`;
   }
@@ -1027,6 +1114,22 @@ window.DiaconiaViewsLider = (() => {
         app.render();
         UI().toast("Casal excluído.");
       });
+    });
+
+    UI().bindBulkTable(root, "casais", {
+      itemLabel: "casal(is)",
+      onDelete: async (ids) => {
+        const set = new Set(ids);
+        state.casais = (state.casais || []).filter((x) => !set.has(x.id));
+        window.DiaconiaHistory.add(state, {
+          tipo: "casal",
+          mensagem: `${ids.length} casal(is) removido(s) em massa.`,
+          usuarioId: ctx(app).sessao()?.usuarioId,
+        });
+        app.save();
+        app.render();
+        UI().toast(`${ids.length} casal(is) excluído(s).`);
+      },
     });
   }
 
@@ -1109,6 +1212,7 @@ window.DiaconiaViewsLider = (() => {
     const rows = state.funcoes
       .map(
         (f) => `<tr class="no-click">
+        ${UI().bulkTd(f.id, "funcoes")}
         <td>${UI().esc(f.emoji)} ${UI().esc(f.nome)}</td>
         <td>${UI().esc(f.horario)}</td>
         <td>${f.qtdPorEquipe}</td>
@@ -1124,9 +1228,9 @@ window.DiaconiaViewsLider = (() => {
         <div><h1>Funções</h1><p class="sub">Horários, quantidade e instruções. Edite ou exclua cada função.</p></div>
         <button class="btn btn-accent" id="btn-add-f">+ Nova função</button>
       </div>
-      <div class="panel"><div class="table-wrap"><table class="data">
-        <thead><tr><th>Função</th><th>Horário</th><th>Qtd/equipe</th><th>Ações</th></tr></thead>
-        <tbody>${rows || `<tr class="no-click"><td colspan="4" class="empty">Nenhuma função cadastrada.</td></tr>`}</tbody>
+      <div class="panel">${UI().bulkBar("funcoes")}<div class="table-wrap"><table class="data" data-bulk-table="funcoes">
+        <thead><tr>${UI().bulkTh("funcoes")}<th>Função</th><th>Horário</th><th>Qtd/equipe</th><th>Ações</th></tr></thead>
+        <tbody>${rows || `<tr class="no-click"><td colspan="5" class="empty">Nenhuma função cadastrada.</td></tr>`}</tbody>
       </table></div></div>`;
   }
 
@@ -1243,6 +1347,21 @@ window.DiaconiaViewsLider = (() => {
         if (f) await confirmarExclusao(f);
       });
     });
+
+    UI().bindBulkTable(root, "funcoes", {
+      itemLabel: "função(ões)",
+      onDelete: async (ids) => {
+        for (const id of ids) removerFuncaoDoEstado(state, id);
+        window.DiaconiaHistory.add(state, {
+          tipo: "funcao",
+          mensagem: `${ids.length} função(ões) excluída(s) em massa.`,
+          usuarioId: ctx(app).sessao()?.usuarioId,
+        });
+        app.save();
+        app.render();
+        UI().toast(`${ids.length} função(ões) excluída(s).`);
+      },
+    });
   }
 
   /* ——— Restrições ——— */
@@ -1280,6 +1399,7 @@ window.DiaconiaViewsLider = (() => {
     function rowHtml(r) {
       const d = state.diaconos.find((x) => x.id === r.diaconoId);
       return `<tr class="no-click">
+        ${UI().bulkTd(r.id, "avisos-lider")}
         <td>${UI().esc(Cal().formatBR(r.data))}</td>
         <td><strong>${UI().esc(d?.nome || "—")}</strong></td>
         <td>${UI().esc(motivoAviso(r))}${r.funcaoId ? " · " + UI().esc(UI().nomeFuncao(state, r.funcaoId)) : ""}${r.horarioChegada ? " · chega " + UI().esc(r.horarioChegada) : ""}</td>
@@ -1344,11 +1464,12 @@ window.DiaconiaViewsLider = (() => {
 
       <div class="panel">
         <div class="panel-head"><h2>Histórico de avisos</h2></div>
-        <div class="table-wrap"><table class="data">
-          <thead><tr><th>Data</th><th>Diácono</th><th>Motivo</th><th>Obs.</th><th>Status</th><th>Ação</th></tr></thead>
+        ${UI().bulkBar("avisos-lider")}
+        <div class="table-wrap"><table class="data" data-bulk-table="avisos-lider">
+          <thead><tr>${UI().bulkTh("avisos-lider")}<th>Data</th><th>Diácono</th><th>Motivo</th><th>Obs.</th><th>Status</th><th>Ação</th></tr></thead>
           <tbody>${
             [...pendentes, ...demais].map(rowHtml).join("") ||
-            `<tr class="no-click"><td colspan="6" class="empty">Nenhum aviso ainda. Quando um diácono clicar em “Não posso ir”, aparece aqui.</td></tr>`
+            `<tr class="no-click"><td colspan="7" class="empty">Nenhum aviso ainda. Quando um diácono clicar em “Não posso ir”, aparece aqui.</td></tr>`
           }</tbody>
         </table></div>
       </div>`;
@@ -1531,8 +1652,21 @@ window.DiaconiaViewsLider = (() => {
         app.render();
         if (res.restricao.afetacoes?.length) {
           UI().toast("Aprovada — escala afetada. Reorganize a data.");
-        } else UI().toast(`Restrição ${status}.`);
+        } else         UI().toast(`Restrição ${status}.`);
       });
+    });
+
+    UI().bindBulkTable(root, "avisos-lider", {
+      itemLabel: "aviso(s)",
+      onDelete: async (ids) => {
+        const sessao = ctx(app).sessao();
+        for (const id of ids) {
+          window.DiaconiaRestrictions.excluir(state, id, sessao);
+        }
+        app.save();
+        app.render();
+        UI().toast(`${ids.length} aviso(s) excluído(s).`);
+      },
     });
   }
 
@@ -1592,6 +1726,7 @@ window.DiaconiaViewsLider = (() => {
         const b = UI().nomeDiacono(state, t.paraDiaconoId);
         const seta = t.modalidade === "cobertura" ? "← cobriu" : "↔";
         return `<tr class="no-click">
+          ${UI().bulkTd(t.id, "trocas-lider")}
           <td>${UI().esc(Cal().formatBR(t.data))}</td>
           <td>${badgeModalidade(t.modalidade)}</td>
           <td>${UI().esc(a)} ${seta} ${UI().esc(b)}</td>
@@ -1616,11 +1751,11 @@ window.DiaconiaViewsLider = (() => {
         </div>
         <button class="btn btn-accent" id="btn-nova-troca">+ Nova troca/cobertura</button>
       </div>
-      <div class="panel"><div class="table-wrap"><table class="data">
-        <thead><tr><th>Data</th><th>Tipo</th><th>Pessoas</th><th>Função</th><th>Status</th><th>Ação</th></tr></thead>
+      <div class="panel">${UI().bulkBar("trocas-lider")}<div class="table-wrap"><table class="data" data-bulk-table="trocas-lider">
+        <thead><tr>${UI().bulkTh("trocas-lider")}<th>Data</th><th>Tipo</th><th>Pessoas</th><th>Função</th><th>Status</th><th>Ação</th></tr></thead>
         <tbody>${
           rows ||
-          `<tr class="no-click"><td colspan="6" class="empty">Nenhum registro. Clique em “+ Nova troca/cobertura”.</td></tr>`
+          `<tr class="no-click"><td colspan="7" class="empty">Nenhum registro. Clique em “+ Nova troca/cobertura”.</td></tr>`
         }</tbody>
       </table></div></div>`;
   }
@@ -1639,6 +1774,30 @@ window.DiaconiaViewsLider = (() => {
         app.render();
         UI().toast(btn.dataset.act === "ok" ? "Pedido aprovado." : "Pedido rejeitado.");
       });
+    });
+
+    UI().bindBulkTable(root, "trocas-lider", {
+      itemLabel: "registro(s) de troca",
+      onDelete: async (ids) => {
+        const set = new Set(ids);
+        for (const t of state.trocas || []) {
+          if (!set.has(t.id)) continue;
+          if (t.escalaAplicada && t.escalaSnapshot && state.escalas[t.data]) {
+            state.escalas[t.data].atribuicoes = JSON.parse(JSON.stringify(t.escalaSnapshot));
+            state.escalas[t.data].status = Engine().statusEscala(state.escalas[t.data], state);
+          }
+        }
+        state.trocas = (state.trocas || []).filter((t) => !set.has(t.id));
+        state.notificacoes = (state.notificacoes || []).filter((n) => !set.has(n.meta?.trocaId));
+        window.DiaconiaHistory.add(state, {
+          tipo: "troca",
+          mensagem: `${ids.length} registro(s) de troca excluído(s) em massa.`,
+          usuarioId: ctx(app).sessao()?.usuarioId,
+        });
+        app.save();
+        app.render();
+        UI().toast(`${ids.length} registro(s) excluído(s).`);
+      },
     });
   }
 
@@ -1787,10 +1946,11 @@ window.DiaconiaViewsLider = (() => {
           ? `<span class="badge badge-ok" title="${UI().esc(wa)}">WA</span>`
           : `<span class="badge badge-muted" title="Sem WhatsApp">—</span>`;
         return `<tr class="no-click">
+        ${UI().bulkTd(u.id, "usuarios", { disabled: sessao?.usuarioId === u.id })}
         <td><strong>${UI().esc(u.nome)}</strong></td>
         <td><code>${UI().esc(u.login)}</code></td>
         <td><span class="badge badge-${u.papel === "lider" ? "ok" : "muted"}">${UI().esc(papelLabel)}</span></td>
-        <td>${u.diaconoId ? UI().esc(UI().nomeDiacono(state, u.diaconoId)) : "—"}</td>
+        <td>${u.papel === "lider" ? "—" : u.diaconoId ? `<span class="badge badge-ok" title="Configure em Diáconos">Ativo</span>` : `<span class="badge badge-muted">—</span>`}</td>
         <td>${waBadge}</td>
         <td>
           <div class="toolbar">
@@ -1811,13 +1971,13 @@ window.DiaconiaViewsLider = (() => {
       <div class="topbar">
         <div>
           <h1>Usuários</h1>
-          <p class="sub">Contas de acesso (liderança e diáconos). Login e senha para entrar no sistema.</p>
+          <p class="sub">Contas de acesso. Diáconos recebem perfil automático — equipe e funções se configuram depois em Diáconos.</p>
         </div>
         <button type="button" class="btn btn-accent" id="btn-add-u">+ Adicionar usuário</button>
       </div>
-      <div class="panel"><div class="table-wrap"><table class="data">
-        <thead><tr><th>Nome</th><th>Login</th><th>Papel</th><th>Diácono</th><th>WA</th><th>Ações</th></tr></thead>
-        <tbody>${rows || `<tr class="no-click"><td colspan="6" class="empty">Nenhum usuário.</td></tr>`}</tbody>
+      <div class="panel">${UI().bulkBar("usuarios")}<div class="table-wrap"><table class="data" data-bulk-table="usuarios">
+        <thead><tr>${UI().bulkTh("usuarios")}<th>Nome</th><th>Login</th><th>Papel</th><th>Perfil</th><th>WA</th><th>Ações</th></tr></thead>
+        <tbody>${rows || `<tr class="no-click"><td colspan="7" class="empty">Nenhum usuário.</td></tr>`}</tbody>
       </table></div></div>`;
   }
 
@@ -1854,18 +2014,31 @@ window.DiaconiaViewsLider = (() => {
         UI().toast("Usuário excluído.");
       });
     });
+
+    UI().bindBulkTable(root, "usuarios", {
+      itemLabel: "usuário(s)",
+      onDelete: async (ids) => {
+        const me = ctx(app).sessao()?.usuarioId;
+        const okIds = ids.filter((id) => id !== me);
+        if (!okIds.length) return UI().toast("Não é possível excluir o usuário logado.");
+        for (const id of okIds) removerLiderDeUsuario(state, id);
+        const set = new Set(okIds);
+        state.usuarios = (state.usuarios || []).filter((u) => !set.has(u.id));
+        window.DiaconiaHistory.add(state, {
+          tipo: "usuario",
+          mensagem: `${okIds.length} usuário(s) excluído(s) em massa.`,
+          usuarioId: me,
+        });
+        app.save();
+        app.render();
+        UI().toast(`${okIds.length} usuário(s) excluído(s).`);
+      },
+    });
   }
 
   function formUsuario(app, usuario = null) {
     const { state } = ctx(app);
     const waInicial = whatsappDoUsuario(state, usuario);
-    const diacs = (state.diaconos || [])
-      .filter((d) => d.ativo !== false)
-      .map(
-        (d) =>
-          `<option value="${d.id}" ${usuario?.diaconoId === d.id ? "selected" : ""}>${UI().esc(d.nome)}</option>`
-      )
-      .join("");
     UI().openModal(`
       <h2>${usuario ? "Editar usuário" : "Adicionar usuário"}</h2>
       <label class="field"><span>Nome</span><input id="u-nome" value="${UI().esc(usuario?.nome || "")}"/></label>
@@ -1873,9 +2046,13 @@ window.DiaconiaViewsLider = (() => {
       <label class="field"><span>WhatsApp (com DDI)</span>
         <input id="u-whatsapp" inputmode="tel" value="${UI().esc(waInicial)}" placeholder="Ex.: 5511999990000"/>
       </label>
-      <p class="muted" style="font-size:12px;margin:-6px 0 12px" id="u-wa-hint">${usuario ? "Usado para contato e, se for liderança, aparece em Minha conta dos diáconos." : "Ao criar, abriremos o WhatsApp com login e senha para enviar ao usuário (se o número estiver preenchido)."}</p>
+      <p class="muted" style="font-size:12px;margin:-6px 0 12px" id="u-wa-hint">${usuario ? "Usado para contato e compartilhar login/senha." : "Ao criar, abriremos o WhatsApp com login e senha (se o número estiver preenchido)."}</p>
       <label class="field"><span>Senha ${usuario ? "(deixe em branco para manter)" : ""}</span>
-        <input id="u-senha" type="password" autocomplete="new-password" placeholder="${usuario ? "••••••••" : "Defina uma senha"}"/>
+        ${UI().passwordFieldHtml({
+          id: "u-senha",
+          placeholder: usuario ? "••••••••" : "Defina uma senha",
+          extraAttrs: { autocomplete: "new-password" },
+        })}
       </label>
       <label class="field"><span>Papel</span>
         <select id="u-papel" class="select">
@@ -1883,12 +2060,7 @@ window.DiaconiaViewsLider = (() => {
           <option value="diacono" ${!usuario || usuario?.papel === "diacono" ? "selected" : ""}>Diácono</option>
         </select>
       </label>
-      <label class="field" id="wrap-diacono"><span>Diácono vinculado (se papel = Diácono)</span>
-        <select id="u-diacono" class="select">
-          <option value="">— nenhum —</option>
-          ${diacs}
-        </select>
-      </label>
+      <p class="muted" style="font-size:12px;margin:-6px 0 8px" id="u-papel-hint">Diácono: o perfil no cadastro é criado automaticamente. Equipe, funções e demais dados se ajustam depois em Diáconos.</p>
       ${
         usuario
           ? `<button type="button" class="btn btn-ghost btn-block" data-act="share-wa" style="margin-top:4px">📲 Compartilhar login e senha no WhatsApp</button>`
@@ -1900,33 +2072,63 @@ window.DiaconiaViewsLider = (() => {
       </div>
     `);
     const m = document.getElementById("modal-root");
+    UI().bindPasswordToggles(m);
     const syncPapel = () => {
       const lider = m.querySelector("#u-papel").value === "lider";
-      m.querySelector("#wrap-diacono").style.display = lider ? "none" : "";
       const hint = m.querySelector("#u-wa-hint");
-      if (hint) {
-        hint.textContent = usuario
-          ? lider
-            ? "Liderança: o número aparece em Falar com um líder na conta de cada diácono. Use o botão abaixo para reenviar login e senha."
-            : "Diácono: sincroniza com o cadastro vinculado. Use o botão abaixo para reenviar login e senha."
-          : lider
-            ? "Liderança: o número aparece em Falar com um líder na conta de cada diácono."
-            : "Diácono: sincroniza com o cadastro do diácono vinculado.";
+      const papelHint = m.querySelector("#u-papel-hint");
+      if (papelHint) {
+        papelHint.textContent = lider
+          ? "Liderança: acesso ao painel de gestão de escalas, diáconos e equipes."
+          : "Diácono: o perfil no cadastro é criado automaticamente. Equipe, funções e demais dados se ajustam depois em Diáconos.";
+      }
+      if (hint && usuario) {
+        hint.textContent = lider
+          ? "Liderança: o número aparece em Falar com um líder na conta de cada diácono. Use o botão abaixo para reenviar login e senha."
+          : "Diácono: use o botão abaixo para reenviar login e senha pelo WhatsApp.";
       }
     };
     m.querySelector("#u-papel")?.addEventListener("change", syncPapel);
     syncPapel();
 
-    m.addEventListener("click", (e) => {
+    m.addEventListener("click", async (e) => {
       const act = e.target.closest("[data-act]")?.dataset.act;
       if (act === "cancel") return UI().closeModal();
+      if (act === "share-wa") {
+        if (!usuario) return;
+        const nomeShare = m.querySelector("#u-nome").value.trim() || usuario.nome;
+        let loginShare = m.querySelector("#u-login").value.trim().toLowerCase().replace(/\s+/g, "");
+        if (!loginShare) loginShare = usuario.login;
+        const senhaCampo = m.querySelector("#u-senha").value;
+        const senhaShare = senhaCampo || usuario.senha;
+        const papelShare = m.querySelector("#u-papel").value;
+        const whatsappShare = String(m.querySelector("#u-whatsapp")?.value || "").replace(/\D/g, "");
+        if (!senhaShare) return UI().toast("Não há senha para compartilhar.");
+        if (whatsappShare && !window.DiaconiaWhatsApp?.numeroValido?.(whatsappShare)) {
+          return UI().toast("WhatsApp inválido. Use DDI + DDD + número (ex.: 5511999990000).");
+        }
+        const snapshot = {
+          ...usuario,
+          nome: nomeShare,
+          login: loginShare,
+          papel: papelShare,
+          whatsapp: whatsappShare,
+        };
+        const wa = window.DiaconiaWhatsApp?.compartilharCredenciaisUsuario?.(state, snapshot, {
+          senha: senhaShare,
+        });
+        if (!wa) return UI().toast("WhatsApp indisponível.");
+        app.save();
+        toastWhatsappCadastro(wa);
+        return;
+      }
       if (act !== "save") return;
       const nome = m.querySelector("#u-nome").value.trim();
       let login = m.querySelector("#u-login").value.trim().toLowerCase().replace(/\s+/g, "");
       const senha = m.querySelector("#u-senha").value;
       const papel = m.querySelector("#u-papel").value;
-      const diaconoId = papel === "diacono" ? m.querySelector("#u-diacono").value || null : null;
       const whatsapp = String(m.querySelector("#u-whatsapp")?.value || "").replace(/\D/g, "");
+      const logId = ctx(app).sessao()?.usuarioId;
       if (whatsapp && !window.DiaconiaWhatsApp?.numeroValido?.(whatsapp)) {
         return UI().toast("WhatsApp inválido. Use DDI + DDD + número (ex.: 5511999990000).");
       }
@@ -1936,21 +2138,22 @@ window.DiaconiaViewsLider = (() => {
         return UI().toast("Este login já existe. Escolha outro.");
       }
       if (!usuario && !senha) return UI().toast("Defina uma senha.");
-      if (papel === "diacono" && !diaconoId) {
-        return UI().toast("Vincule um diácono ou escolha o papel Liderança.");
-      }
 
       let waCadastro = null;
       if (usuario) {
         usuario.nome = nome;
         usuario.login = login;
         usuario.papel = papel;
-        usuario.diaconoId = diaconoId;
-        if (senha) usuario.senha = senha;
+        if (senha) {
+          usuario.senha = senha;
+          window.DiaconiaStorage.touchUsuario?.(usuario);
+        }
         if (papel === "lider") {
           syncLiderDeUsuario(state, usuario, whatsapp);
+          usuario.diaconoId = null;
         } else {
           removerLiderDeUsuario(state, usuario.id);
+          garantirPerfilDiacono(state, usuario, { nome, whatsapp }, logId);
           syncDiaconoWhatsappDoUsuario(state, usuario, whatsapp);
         }
         window.DiaconiaHistory.add(state, {
@@ -1965,15 +2168,17 @@ window.DiaconiaViewsLider = (() => {
           login,
           senha,
           papel,
-          diaconoId,
+          diaconoId: null,
           whatsapp,
         };
         if (papel === "lider") {
           syncLiderDeUsuario(state, novo, whatsapp);
         } else {
+          garantirPerfilDiacono(state, novo, { nome, whatsapp }, logId);
           syncDiaconoWhatsappDoUsuario(state, novo, whatsapp);
         }
         state.usuarios.push(novo);
+        window.DiaconiaStorage.touchUsuario?.(novo);
         window.DiaconiaHistory.add(state, {
           tipo: "usuario",
           mensagem: `Usuário criado: ${login} (${papel}).`,
@@ -1981,10 +2186,16 @@ window.DiaconiaViewsLider = (() => {
         });
         waCadastro = window.DiaconiaWhatsApp?.notificarCadastroUsuario?.(state, novo, { senha });
       }
-      app.save();
+      const sync = await app.saveAndSync();
       UI().closeModal();
       app.render();
-      UI().toast("Usuário salvo.");
+      if (senha && sync?.ok) {
+        UI().toast("Usuário salvo e sincronizado no servidor.");
+      } else if (senha && !sync?.ok) {
+        UI().toast("Salvo neste aparelho — não confirmou no servidor. Tente salvar de novo.");
+      } else {
+        UI().toast("Usuário salvo.");
+      }
       if (waCadastro) toastWhatsappCadastro(waCadastro);
     });
   }
@@ -2009,6 +2220,7 @@ window.DiaconiaViewsLider = (() => {
       .slice(0, 200)
       .map(
         (h) => `<tr class="no-click">
+        ${UI().bulkTd(h.id, "historico")}
         <td>${UI().esc(new Date(h.em).toLocaleString("pt-BR"))}</td>
         <td><span class="chip">${UI().esc(h.tipo)}</span></td>
         <td>${UI().esc(h.mensagem)}</td>
@@ -2046,9 +2258,9 @@ window.DiaconiaViewsLider = (() => {
           <input id="hist-busca" class="input" placeholder="Texto da mensagem…" value="${UI().esc(app.filtroHistoricoBusca || "")}"/>
         </label>
       </div>
-      <div class="panel"><div class="table-wrap"><table class="data">
-        <thead><tr><th>Quando</th><th>Tipo</th><th>Mensagem</th><th>Ações</th></tr></thead>
-        <tbody>${rows || `<tr class="no-click"><td colspan="4" class="empty">Nenhum registro neste filtro.</td></tr>`}</tbody>
+      <div class="panel">${UI().bulkBar("historico")}<div class="table-wrap"><table class="data" data-bulk-table="historico">
+        <thead><tr>${UI().bulkTh("historico")}<th>Quando</th><th>Tipo</th><th>Mensagem</th><th>Ações</th></tr></thead>
+        <tbody>${rows || `<tr class="no-click"><td colspan="5" class="empty">Nenhum registro neste filtro.</td></tr>`}</tbody>
       </table></div></div>`;
   }
 
@@ -2096,6 +2308,17 @@ window.DiaconiaViewsLider = (() => {
       app.save();
       app.render();
       UI().toast("Histórico limpo.");
+    });
+
+    UI().bindBulkTable(root, "historico", {
+      itemLabel: "registro(s)",
+      onDelete: async (ids) => {
+        const set = new Set(ids);
+        state.historico = (state.historico || []).filter((h) => !set.has(h.id));
+        app.save();
+        app.render();
+        UI().toast(`${ids.length} registro(s) excluído(s).`);
+      },
     });
   }
 
@@ -2175,9 +2398,11 @@ window.DiaconiaViewsLider = (() => {
         <div class="grid grid-2" style="margin-top:12px">
           <div>
             <label class="field"><span><input type="checkbox" id="wa-ativo" ${wa.ativo !== false ? "checked" : ""}/> Canal WhatsApp ativo</span></label>
-            <label class="field"><span><input type="checkbox" id="wa-troca" ${wa.notificarPedidoTroca !== false ? "checked" : ""}/> Avisar pedidos de troca/cobertura</span></label>
+            <label class="field"><span><input type="checkbox" id="wa-troca" ${wa.notificarPedidoTroca !== false ? "checked" : ""}/> Avisar quem recebe pedido de troca/cobertura</span></label>
+            <label class="field"><span><input type="checkbox" id="wa-troca-resp" ${wa.notificarRespostaTroca !== false ? "checked" : ""}/> Avisar quem pediu quando aceitarem ou recusarem</span></label>
             <label class="field"><span><input type="checkbox" id="wa-cadastro" ${wa.notificarCadastroUsuario !== false ? "checked" : ""}/> Enviar login e senha ao criar usuário</span></label>
-            <label class="field"><span><input type="checkbox" id="wa-rest" ${wa.notificarRestricao ? "checked" : ""}/> Avisar líderes sobre restrições (futuro)</span></label>
+            <label class="field"><span><input type="checkbox" id="wa-rest" ${wa.notificarRestricao !== false ? "checked" : ""}/> Avisar líderes quando diácono enviar “Não posso ir”</span></label>
+            <label class="field"><span><input type="checkbox" id="wa-rest-st" ${wa.notificarStatusRestricao !== false ? "checked" : ""}/> Avisar diácono quando líder aprovar ou recusar aviso</span></label>
             <label class="field"><span><input type="checkbox" id="wa-abrir" ${wa.abrirNoNavegador !== false ? "checked" : ""}/> Abrir conversa no navegador (modo manual)</span></label>
             <label class="field"><span>Modo de envio</span>
               <select id="wa-modo" class="select">
@@ -2307,8 +2532,10 @@ window.DiaconiaViewsLider = (() => {
         ...(state.configuracoes.whatsapp || {}),
         ativo: root.querySelector("#wa-ativo")?.checked !== false,
         notificarPedidoTroca: root.querySelector("#wa-troca")?.checked !== false,
+        notificarRespostaTroca: root.querySelector("#wa-troca-resp")?.checked !== false,
         notificarCadastroUsuario: root.querySelector("#wa-cadastro")?.checked !== false,
-        notificarRestricao: !!root.querySelector("#wa-rest")?.checked,
+        notificarRestricao: root.querySelector("#wa-rest")?.checked !== false,
+        notificarStatusRestricao: root.querySelector("#wa-rest-st")?.checked !== false,
         abrirNoNavegador: root.querySelector("#wa-abrir")?.checked !== false,
         modo: root.querySelector("#wa-modo")?.value === "api" ? "api" : "manual",
         portalBaseUrl: root.querySelector("#wa-portal")?.value.trim() || "",

@@ -190,7 +190,15 @@ window.DiaconiaSwaps = (() => {
       });
     }
 
-    return { ok: true, troca: t };
+    let whatsapp = null;
+    if (typeof window.DiaconiaWhatsApp?.notificarRespostaTroca === "function") {
+      whatsapp = window.DiaconiaWhatsApp.notificarRespostaTroca(state, t, {
+        aceita: true,
+        porNome: sessao.nome,
+      });
+    }
+
+    return { ok: true, troca: t, whatsapp };
   }
 
   function recusar(state, trocaId, sessao) {
@@ -211,7 +219,27 @@ window.DiaconiaSwaps = (() => {
       mensagem: `${t.modalidade === "cobertura" ? "Cobertura" : "Troca"} ${trocaId} recusada — escala restaurada.`,
       usuarioId: sessao.usuarioId,
     });
-    return { ok: true, troca: t };
+
+    const userPediu = state.usuarios.find((u) => u.diaconoId === t.deDiaconoId);
+    if (userPediu) {
+      Hist().notify(state, {
+        usuarioId: userPediu.id,
+        titulo: "Pedido recusado",
+        corpo: `${sessao.nome} recusou seu pedido de ${t.data}. Sua escala voltou ao normal.`,
+        link: "?ir=avisos",
+        meta: { tipo: "troca_recusada", trocaId: t.id },
+      });
+    }
+
+    let whatsapp = null;
+    if (typeof window.DiaconiaWhatsApp?.notificarRespostaTroca === "function") {
+      whatsapp = window.DiaconiaWhatsApp.notificarRespostaTroca(state, t, {
+        aceita: false,
+        porNome: sessao.nome,
+      });
+    }
+
+    return { ok: true, troca: t, whatsapp };
   }
 
   function atualizar(state, trocaId, payload, sessao) {

@@ -107,6 +107,89 @@ window.DiaconiaUI = (() => {
     });
   }
 
+  function confirmDeleteBulk({ count, itemLabel = "item(ns)", detalhes = "" }) {
+    const extra = detalhes ? `<div class="alert alert-warn">${detalhes}</div>` : "";
+    const n = Number(count) || 0;
+    const rotulo = n === 1 ? `1 ${itemLabel.replace(/\(s\)$/, "")}` : `${n} ${itemLabel}`;
+    return confirmModal({
+      title: "Excluir selecionados",
+      body: `<p>Deseja realmente <strong>excluir</strong> ${rotulo}?</p>
+        <p class="muted">Esta ação não pode ser desfeita facilmente.</p>
+        ${extra}`,
+      okText: n === 1 ? "Sim, excluir" : `Excluir ${n} itens`,
+      cancelText: "Cancelar",
+      danger: true,
+    });
+  }
+
+  function bulkTh(tableId) {
+    return `<th class="col-bulk"><input type="checkbox" class="bulk-all" data-bulk-all="${esc(tableId)}" aria-label="Selecionar todos" title="Selecionar todos"/></th>`;
+  }
+
+  function bulkTd(id, tableId, { disabled = false } = {}) {
+    const dis = disabled ? " disabled" : "";
+    return `<td class="col-bulk"><input type="checkbox" class="bulk-one" data-bulk-id="${esc(id)}" data-bulk-table="${esc(tableId)}" aria-label="Selecionar"${dis}/></td>`;
+  }
+
+  function bulkBar(tableId, { deleteLabel = "Excluir selecionados" } = {}) {
+    return `<div class="bulk-bar hidden" data-bulk-bar="${esc(tableId)}">
+      <span class="bulk-bar-count" data-bulk-count="${esc(tableId)}">0 selecionado(s)</span>
+      <button type="button" class="btn btn-danger btn-sm" data-bulk-del="${esc(tableId)}" disabled>${esc(deleteLabel)}</button>
+    </div>`;
+  }
+
+  function bindBulkTable(root, tableId, { onDelete, itemLabel = "item(ns)" }) {
+    const table = root.querySelector(`table[data-bulk-table="${tableId}"]`);
+    if (!table) return;
+
+    const bar = root.querySelector(`[data-bulk-bar="${tableId}"]`);
+    const countEl = root.querySelector(`[data-bulk-count="${tableId}"]`);
+    const delBtn = root.querySelector(`[data-bulk-del="${tableId}"]`);
+    const allCb = table.querySelector(`[data-bulk-all="${tableId}"]`);
+
+    const getRows = () =>
+      [...table.querySelectorAll(`.bulk-one[data-bulk-table="${tableId}"]:not(:disabled)`)];
+
+    const selectedIds = () => getRows().filter((c) => c.checked).map((c) => c.dataset.bulkId);
+
+    const refreshUI = () => {
+      const ids = selectedIds();
+      const n = ids.length;
+      const total = getRows().length;
+      bar?.classList.toggle("hidden", n === 0);
+      if (countEl) countEl.textContent = n === 1 ? "1 selecionado" : `${n} selecionado(s)`;
+      if (delBtn) delBtn.disabled = n === 0;
+      if (allCb) {
+        allCb.checked = n > 0 && n === total;
+        allCb.indeterminate = n > 0 && n < total;
+      }
+    };
+
+    table.addEventListener("change", (e) => {
+      const t = e.target;
+      if (t.matches(`[data-bulk-all="${tableId}"]`)) {
+        const checked = t.checked;
+        getRows().forEach((c) => {
+          c.checked = checked;
+        });
+        refreshUI();
+        return;
+      }
+      if (t.matches(`.bulk-one[data-bulk-table="${tableId}"]`)) refreshUI();
+    });
+
+    delBtn?.addEventListener("click", async () => {
+      const ids = selectedIds();
+      if (!ids.length) return;
+      const ok = await confirmDeleteBulk({ count: ids.length, itemLabel });
+      if (!ok) return;
+      await onDelete(ids);
+      refreshUI();
+    });
+
+    refreshUI();
+  }
+
   function mesSelect(ano, mes) {
     const meses = window.DiaconiaCalendar.MESES.map(
       (n, i) => `<option value="${i + 1}" ${i + 1 === mes ? "selected" : ""}>${n}</option>`
@@ -554,6 +637,7 @@ window.DiaconiaUI = (() => {
     check: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>`,
     x: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
     refresh: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>`,
+    "eye-off": `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/></svg>`,
   };
 
   function icon(name) {
@@ -573,6 +657,39 @@ window.DiaconiaUI = (() => {
     return `<button type="button" class="btn btn-${esc(variant)} btn-sm btn-icon" title="${esc(label)}" aria-label="${esc(label)}" ${extra} ${dis}>${icon(iconName)}</button>`;
   }
 
+  /**
+   * Campo de senha com botão para mostrar/ocultar.
+   * extraAttrs: ex. { name: "senha", autocomplete: "current-password", required: true }
+   */
+  function passwordFieldHtml({ id, placeholder = "", className = "", extraAttrs = {} } = {}) {
+    const idAttr = id ? ` id="${esc(id)}"` : "";
+    const extra = Object.entries(extraAttrs)
+      .filter(([, v]) => v != null && v !== false)
+      .map(([k, v]) => (v === true ? k : `${k}="${esc(String(v))}"`))
+      .join(" ");
+    return `<div class="input-password">
+      <input type="password"${idAttr} class="${esc(className || "input")}" placeholder="${esc(placeholder)}" ${extra}/>
+      <button type="button" class="btn-password-toggle" data-act="toggle-password" title="Mostrar senha" aria-label="Mostrar senha">${icon("eye")}</button>
+    </div>`;
+  }
+
+  function bindPasswordToggles(root = document) {
+    root.querySelectorAll("[data-act=toggle-password]").forEach((btn) => {
+      if (btn.dataset.boundPassword) return;
+      btn.dataset.boundPassword = "1";
+      btn.addEventListener("click", () => {
+        const wrap = btn.closest(".input-password");
+        const input = wrap?.querySelector("input");
+        if (!input) return;
+        const show = input.type === "password";
+        input.type = show ? "text" : "password";
+        btn.innerHTML = icon(show ? "eye-off" : "eye");
+        btn.title = show ? "Ocultar senha" : "Mostrar senha";
+        btn.setAttribute("aria-label", btn.title);
+      });
+    });
+  }
+
   return {
     $,
     $$,
@@ -583,6 +700,11 @@ window.DiaconiaUI = (() => {
     closeModal,
     confirmModal,
     confirmDelete,
+    confirmDeleteBulk,
+    bulkTh,
+    bulkTd,
+    bulkBar,
+    bindBulkTable,
     mesSelect,
     bindMesNav,
     nomeDiacono,
@@ -610,5 +732,7 @@ window.DiaconiaUI = (() => {
     abrirWhatsAppPedidoTroca,
     icon,
     btnIcon,
+    passwordFieldHtml,
+    bindPasswordToggles,
   };
 })();
