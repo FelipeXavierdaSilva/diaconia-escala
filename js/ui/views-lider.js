@@ -37,10 +37,34 @@ window.DiaconiaViewsLider = (() => {
         );
         return;
       }
-      UI().toast(`Mensagem copiada — use o painel para abrir o WhatsApp Web.`);
+      if (wa.via === "manual_direto") {
+        UI().toast(
+          `WhatsApp aberto para ${wa.nome || "o destinatário"}. A mensagem com login e senha já está pronta para enviar.`
+        );
+        return;
+      }
+      UI().toast(`Mensagem copiada — use o botão do painel para abrir o WhatsApp.`);
       return;
     }
-    UI().toast(wa.erro || "WhatsApp não enviado — cadastre o número com DDD (ex.: 47997845287).");
+    UI().toast(wa.erro || "WhatsApp não enviado — cadastre o número com DDI + DDD (ex.: 5547997845287).");
+  }
+
+  function compartilharCredenciaisUsuarioApp(app, usuario, senha) {
+    if (!usuario?.senha && !senha) {
+      UI().toast("Este usuário não tem senha cadastrada.");
+      return null;
+    }
+    const { state } = ctx(app);
+    const wa = window.DiaconiaWhatsApp?.compartilharCredenciaisUsuario?.(state, usuario, {
+      senha: senha || usuario.senha,
+    });
+    if (!wa) {
+      UI().toast("WhatsApp indisponível.");
+      return null;
+    }
+    app.save();
+    toastWhatsappCadastro(wa);
+    return wa;
   }
 
   function whatsappDoUsuario(state, usuario) {
@@ -850,19 +874,24 @@ window.DiaconiaViewsLider = (() => {
           whatsapp: novo.whatsapp || "",
         };
         state.usuarios.push(novoUsuario);
+        window.DiaconiaStorage.touchUsuario?.(novoUsuario);
         window.DiaconiaHistory.add(state, {
           tipo: "usuario",
           mensagem: `Usuário criado automaticamente: ${novoUsuario.login} (diácono).`,
           usuarioId: ctx(app).sessao()?.usuarioId,
         });
-        app.save();
+        const sync = await app.saveAndSync();
         const wa = window.DiaconiaWhatsApp?.notificarCadastroUsuario?.(state, novoUsuario, {
           senha: senhaPadrao,
         });
         if (wa?.ok || (wa && !wa.ignorado)) app.save();
         UI().closeModal();
         app.render();
-        UI().toast("Diácono salvo.");
+        if (sync?.ok) {
+          UI().toast("Diácono salvo e sincronizado no servidor.");
+        } else {
+          UI().toast("Diácono salvo neste aparelho — confirme a sincronização salvando de novo.");
+        }
         toastWhatsappCadastro(wa);
         return;
       }
@@ -1954,6 +1983,11 @@ window.DiaconiaViewsLider = (() => {
         <td>${waBadge}</td>
         <td>
           <div class="toolbar">
+            ${
+              u.senha && window.DiaconiaWhatsApp?.numeroValido?.(wa)
+                ? `<button type="button" class="btn btn-accent btn-sm" data-act="share-wa-row" data-id="${u.id}" title="Enviar login e senha no WhatsApp">WhatsApp</button>`
+                : ""
+            }
             ${UI().btnIcon({ icon: "pencil", label: "Editar", variant: "ghost", attrs: { "data-act": "edit-u", "data-id": u.id } })}
             ${UI().btnIcon({
               icon: "trash",
@@ -1988,6 +2022,13 @@ window.DiaconiaViewsLider = (() => {
       btn.addEventListener("click", () => {
         const u = state.usuarios.find((x) => x.id === btn.dataset.id);
         formUsuario(app, u);
+      });
+    });
+    root.querySelectorAll('[data-act="share-wa-row"]').forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const u = state.usuarios.find((x) => x.id === btn.dataset.id);
+        if (!u) return;
+        compartilharCredenciaisUsuarioApp(app, u);
       });
     });
     root.querySelectorAll('[data-act="del-u"]').forEach((btn) => {
@@ -2081,6 +2122,8 @@ window.DiaconiaViewsLider = (() => {
     `);
     const m = document.getElementById("modal-root");
     UI().bindPasswordToggles(m);
+    const senhaInput = m.querySelector("#u-senha");
+    if (senhaInput && usuario?.senha) senhaInput.value = usuario.senha;
     const syncPapel = () => {
       const lider = m.querySelector("#u-papel").value === "lider";
       const hint = m.querySelector("#u-wa-hint");
@@ -2121,13 +2164,12 @@ window.DiaconiaViewsLider = (() => {
           login: loginShare,
           papel: papelShare,
           whatsapp: whatsappShare,
-        };
-        const wa = window.DiaconiaWhatsApp?.compartilharCredenciaisUsuario?.(state, snapshot, {
           senha: senhaShare,
-        });
-        if (!wa) return UI().toast("WhatsApp indisponível.");
-        app.save();
-        toastWhatsappCadastro(wa);
+        };
+        syncDiaconoWhatsappDoUsuario(state, snapshot, whatsappShare);
+        syncLiderDeUsuario(state, snapshot, whatsappShare);
+        const wa = compartilharCredenciaisUsuarioApp(app, snapshot, senhaShare);
+        if (!wa?.ok && wa) return;
         return;
       }
       if (act !== "save") return;
@@ -2413,7 +2455,8 @@ window.DiaconiaViewsLider = (() => {
             <label class="field"><span><input type="checkbox" id="wa-cadastro" ${wa.notificarCadastroUsuario !== false ? "checked" : ""}/> Enviar login e senha ao criar usuário</span></label>
             <label class="field"><span><input type="checkbox" id="wa-rest" ${wa.notificarRestricao !== false ? "checked" : ""}/> Avisar líderes quando diácono enviar “Não posso ir”</span></label>
             <label class="field"><span><input type="checkbox" id="wa-rest-st" ${wa.notificarStatusRestricao !== false ? "checked" : ""}/> Avisar diácono quando líder aprovar ou recusar aviso</span></label>
-            <label class="field"><span><input type="checkbox" id="wa-abrir" ${wa.abrirNoNavegador !== false ? "checked" : ""}/> Abrir conversa no navegador (modo manual)</span></label>
+            <label class="field"><span><input type="checkbox" id="wa-direto" ${wa.abrirDireto !== false ? "checked" : ""}/> Abrir conversa direto no WhatsApp (recomendado)</span></label>
+            <p class="muted" style="font-size:12px;margin:-8px 0 12px">Desmarcado = mostra painel para copiar a mensagem antes de abrir.</p>
             <label class="field"><span>Modo de envio</span>
               <select id="wa-modo" class="select">
                 <option value="manual" ${wa.modo !== "api" ? "selected" : ""}>Manual (wa.me) — atual</option>
@@ -2546,7 +2589,8 @@ window.DiaconiaViewsLider = (() => {
         notificarCadastroUsuario: root.querySelector("#wa-cadastro")?.checked !== false,
         notificarRestricao: root.querySelector("#wa-rest")?.checked !== false,
         notificarStatusRestricao: root.querySelector("#wa-rest-st")?.checked !== false,
-        abrirNoNavegador: root.querySelector("#wa-abrir")?.checked !== false,
+        abrirDireto: root.querySelector("#wa-direto")?.checked !== false,
+        abrirNoNavegador: true,
         modo: root.querySelector("#wa-modo")?.value === "api" ? "api" : "manual",
         portalBaseUrl: root.querySelector("#wa-portal")?.value.trim() || "",
         apiUrl: root.querySelector("#wa-api-url")?.value.trim() || "",

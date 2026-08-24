@@ -16,6 +16,8 @@ window.DiaconiaWhatsApp = (() => {
     return {
       ativo: true,
       modo: MODOS.manual,
+      /** true = abre wa.me direto na conversa; false = painel com copiar + link */
+      abrirDireto: true,
       abrirNoNavegador: true,
       notificarPedidoTroca: true,
       notificarRespostaTroca: true,
@@ -96,11 +98,11 @@ window.DiaconiaWhatsApp = (() => {
       if (u.ok) return { ok: true, numero: u.numero, nome: u.nome, diacono: d, usuario };
     }
 
-    const numero = normalizarNumero(d.whatsapp);
+    const numero = normalizarNumeroInternacional(d.whatsapp);
     if (!numeroValido(numero)) {
       return {
         ok: false,
-        erro: `${d.nome} ainda não tem WhatsApp válido cadastrado.`,
+        erro: `${d.nome} ainda não tem WhatsApp válido cadastrado (use DDI + DDD, ex.: 5547997845287).`,
         numero: "",
         nome: d.nome,
         diacono: d,
@@ -109,29 +111,24 @@ window.DiaconiaWhatsApp = (() => {
     return { ok: true, numero, nome: d.nome, diacono: d, usuario: usuario || null };
   }
 
-  function whatsappDeDiacono(state, diaconoId) {
-    return numeroDeDiacono(state, diaconoId);
-  }
-
   function numeroDeUsuario(state, usuario) {
     if (!usuario) return { ok: false, erro: "Usuário não encontrado.", numero: "", nome: "" };
 
-    let numero = normalizarNumero(usuario.whatsapp);
+    let raw = usuario.whatsapp;
 
-    if (!numeroValido(numero) && usuario.diaconoId) {
-      const d = state.diaconos.find((x) => x.id === usuario.diaconoId);
-      numero = normalizarNumero(d?.whatsapp);
+    if (!raw && usuario.diaconoId) {
+      raw = state.diaconos.find((x) => x.id === usuario.diaconoId)?.whatsapp;
     }
 
-    if (!numeroValido(numero) && usuario.papel === "lider") {
-      const l = (state.lideres || []).find((x) => x.usuarioId === usuario.id);
-      numero = normalizarNumero(l?.whatsapp);
+    if (!raw && usuario.papel === "lider") {
+      raw = (state.lideres || []).find((x) => x.usuarioId === usuario.id)?.whatsapp;
     }
 
+    const numero = normalizarNumeroInternacional(raw);
     if (!numeroValido(numero)) {
       return {
         ok: false,
-        erro: `${usuario.nome} ainda não tem WhatsApp válido cadastrado.`,
+        erro: `${usuario.nome} ainda não tem WhatsApp válido. Cadastre com DDI + DDD (ex.: 5547997845287).`,
         numero: "",
         nome: usuario.nome,
       };
@@ -141,13 +138,19 @@ window.DiaconiaWhatsApp = (() => {
 
   function numeroDeLider(state, lider) {
     if (!lider) return { ok: false, erro: "Líder não encontrado.", numero: "", nome: "" };
-    let numero = normalizarNumero(lider.whatsapp);
-    if (!numeroValido(numero) && lider.usuarioId) {
+    let raw = lider.whatsapp;
+    if (!raw && lider.usuarioId) {
       const u = state.usuarios.find((x) => x.id === lider.usuarioId);
-      if (u) return numeroDeUsuario(state, u);
+      if (u?.whatsapp) raw = u.whatsapp;
     }
+    const numero = normalizarNumeroInternacional(raw);
     if (!numeroValido(numero)) {
-      return { ok: false, erro: `${lider.nome} ainda não tem WhatsApp cadastrado.`, numero: "", nome: lider.nome };
+      return {
+        ok: false,
+        erro: `${lider.nome} ainda não tem WhatsApp cadastrado (ex.: 5547997845287).`,
+        numero: "",
+        nome: lider.nome,
+      };
     }
     return { ok: true, numero, nome: lider.nome, lider };
   }
@@ -166,9 +169,38 @@ window.DiaconiaWhatsApp = (() => {
     return `https://web.whatsapp.com/send?phone=${n}&text=${encodeURIComponent(texto || "")}`;
   }
 
-  /** @deprecated preferir waWebUrl — wa.me falha no WhatsApp Desktop (Windows) */
+  /** Link oficial — abre app no celular ou WhatsApp Desktop no PC */
   function waMeUrl(numero, texto) {
-    return waWebUrl(numero, texto);
+    const n = normalizarNumeroInternacional(numero);
+    return `https://wa.me/${n}?text=${encodeURIComponent(texto || "")}`;
+  }
+
+  /** Abre a conversa diretamente (sem painel intermediário) */
+  function abrirConversaWhatsapp(numero, texto) {
+    const n = normalizarNumeroInternacional(numero);
+    if (!numeroValido(n)) {
+      return { ok: false, erro: "Número de WhatsApp inválido." };
+    }
+    const url = waMeUrl(n, texto);
+    const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
+
+    if (mobile) {
+      window.location.href = url;
+    } else {
+      const a = document.createElement("a");
+      a.href = url;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+
+    return { ok: true, url, via: "wa.me" };
+  }
+
+  function whatsappDeDiacono(state, diaconoId) {
+    return numeroDeDiacono(state, diaconoId);
   }
 
   async function copiarTexto(texto) {
@@ -194,15 +226,15 @@ window.DiaconiaWhatsApp = (() => {
     UI.openModal(`
       <h2>${UI.esc(titulo)}</h2>
       <p class="muted" style="margin-top:0;font-size:13px">
-        A mensagem já foi <strong>copiada</strong>. No PC, use <strong>Abrir WhatsApp Web</strong> (funciona melhor que o app instalado).
-        Se usar o app do Windows, busque o contato e cole com <kbd>Ctrl+V</kbd>.
+        A mensagem foi <strong>copiada</strong>. Clique abaixo para abrir a conversa no WhatsApp.
       </p>
       <p class="muted" style="font-size:12px;margin:-4px 0 12px">Número: <strong>${UI.esc(numFmt)}</strong></p>
       <label class="field"><span>Mensagem</span>
         <textarea id="wa-painel-texto" class="textarea" rows="10" readonly>${UI.esc(texto)}</textarea>
       </label>
       <div class="modal-actions" style="flex-wrap:wrap">
-        <button type="button" class="btn btn-accent" data-act="wa-web">Abrir WhatsApp Web</button>
+        <button type="button" class="btn btn-accent" data-act="wa-web">Abrir conversa no WhatsApp</button>
+        <button type="button" class="btn btn-ghost" data-act="wa-web-alt">WhatsApp Web (alternativo)</button>
         <button type="button" class="btn btn-ghost" data-act="wa-copy">Copiar mensagem</button>
         <button type="button" class="btn btn-ghost" data-act="cancel">Fechar</button>
       </div>
@@ -213,7 +245,11 @@ window.DiaconiaWhatsApp = (() => {
       const act = e.target.closest("[data-act]")?.dataset.act;
       if (act === "cancel") return UI.closeModal();
       if (act === "wa-web") {
-        window.open(url, "_blank", "noopener,noreferrer");
+        abrirConversaWhatsapp(numFmt, m.querySelector("#wa-painel-texto")?.value || texto);
+        return;
+      }
+      if (act === "wa-web-alt") {
+        window.open(waWebUrl(numFmt, m.querySelector("#wa-painel-texto")?.value || texto), "_blank", "noopener,noreferrer");
         return;
       }
       if (act === "wa-copy") {
@@ -420,18 +456,23 @@ window.DiaconiaWhatsApp = (() => {
     }
   }
 
-  function enviarManual(payload) {
+  function enviarManual(payload, state) {
     const num = normalizarNumeroInternacional(payload.numero);
     const texto = payload.texto || "";
-    const url = waWebUrl(num, texto);
+    const c = cfg(state || window.DiaconiaApp?.state);
+    const usarPainel = payload.usarPainelManual === true || c.abrirDireto === false;
 
     copiarTexto(texto).catch(() => {});
 
-    if (payload.abrirNoNavegador !== false) {
+    if (usarPainel) {
+      const url = waMeUrl(num, texto);
       painelEnvioManual({ nome: payload.nome, numero: num, texto, webUrl: url });
+      return { ok: true, via: "manual_painel", url, copiado: true, nome: payload.nome };
     }
 
-    return { ok: true, via: "manual", url, copiado: true, nome: payload.nome };
+    const aberto = abrirConversaWhatsapp(num, texto);
+    if (!aberto.ok) return aberto;
+    return { ok: true, via: "manual_direto", url: aberto.url, copiado: true, nome: payload.nome };
   }
 
   function enviar(state, { tipo, paraDiaconoId, paraNumero, paraUsuarioId, texto, meta, abrirNoNavegador }) {
@@ -442,7 +483,7 @@ window.DiaconiaWhatsApp = (() => {
     }
 
     let numero = normalizarNumeroInternacional(paraNumero);
-    let nome = "";
+    let nome = meta?.nome || "";
 
     if (paraUsuarioId) {
       const u = state.usuarios.find((x) => x.id === paraUsuarioId);
@@ -521,7 +562,7 @@ window.DiaconiaWhatsApp = (() => {
       return { ok: true, via: "api", filaId: fila.id, nome, pendenteApi: !c.apiUrl };
     }
 
-    const res = enviarManual(payload);
+    const res = enviarManual(payload, state);
     registrarLog(state, {
       tipo: payload.tipo,
       paraDiaconoId: paraDiaconoId || null,
@@ -595,7 +636,7 @@ window.DiaconiaWhatsApp = (() => {
       tipo: "cadastro_usuario",
       paraNumero: dest.numero,
       texto,
-      meta: { usuarioId: usuario.id, login: usuario.login, papel: usuario.papel, manual: true },
+      meta: { usuarioId: usuario.id, login: usuario.login, papel: usuario.papel, manual: true, nome: dest.nome },
     });
   }
 
@@ -692,6 +733,7 @@ window.DiaconiaWhatsApp = (() => {
     portalUrl,
     waMeUrl,
     waWebUrl,
+    abrirConversaWhatsapp,
     painelEnvioManual,
     montarMensagem,
     motivoAvisoTexto,

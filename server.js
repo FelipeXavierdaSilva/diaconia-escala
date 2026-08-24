@@ -37,6 +37,37 @@ app.get("/api/state", (_req, res) => {
   });
 });
 
+function mergeUsuarioLists(localUsers, remoteUsers) {
+  const map = new Map((remoteUsers || []).map((u) => [u.id, u]));
+  for (const lu of localUsers || []) {
+    const ru = map.get(lu.id);
+    if (!ru) {
+      map.set(lu.id, lu);
+      continue;
+    }
+    const lt = lu.atualizadoEm || "";
+    const rt = ru.atualizadoEm || "";
+    const merged = lt >= rt ? { ...ru, ...lu } : { ...lu, ...ru };
+    if (!merged.senha) merged.senha = lu.senha || ru.senha || "";
+    map.set(lu.id, merged);
+  }
+  return [...map.values()];
+}
+
+function mergeStates(local, remote) {
+  if (!remote) return local;
+  if (!local) return remote;
+  const localTs = local.meta?.atualizadoEm || "";
+  const remoteTs = remote.meta?.atualizadoEm || "";
+  const base = remoteTs > localTs ? { ...local, ...remote } : { ...remote, ...local };
+  base.usuarios = mergeUsuarioLists(local.usuarios, remote.usuarios);
+  base.meta = {
+    ...(base.meta || {}),
+    atualizadoEm: localTs >= remoteTs ? localTs || remoteTs : remoteTs,
+  };
+  return base;
+}
+
 app.put("/api/state", (req, res) => {
   const { state } = req.body || {};
   if (!state || typeof state !== "object") {
@@ -46,18 +77,9 @@ app.put("/api/state", (req, res) => {
   ensureDataDir();
   try {
     const existing = readStateFile();
-    const incomingTs = state.meta?.atualizadoEm || "";
-    const existingTs = existing?.meta?.atualizadoEm || "";
-    if (existing && existingTs > incomingTs) {
-      return res.json({
-        ok: true,
-        state: existing,
-        merged: false,
-        reason: "stale",
-      });
-    }
-    fs.writeFileSync(STATE_FILE, JSON.stringify(state));
-    res.json({ ok: true, state, merged: true });
+    const merged = existing ? mergeStates(state, existing) : state;
+    fs.writeFileSync(STATE_FILE, JSON.stringify(merged));
+    res.json({ ok: true, state: merged, merged: true });
   } catch {
     res.status(500).json({ ok: false, erro: "Falha ao gravar estado." });
   }

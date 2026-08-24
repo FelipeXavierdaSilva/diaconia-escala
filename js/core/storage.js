@@ -28,7 +28,9 @@ window.DiaconiaStorage = (() => {
       }
       const lt = lu.atualizadoEm || "";
       const rt = ru.atualizadoEm || "";
-      map.set(lu.id, lt >= rt ? lu : ru);
+      const merged = lt >= rt ? { ...ru, ...lu } : { ...lu, ...ru };
+      if (!merged.senha) merged.senha = lu.senha || ru.senha || "";
+      map.set(lu.id, merged);
     }
     return [...map.values()];
   }
