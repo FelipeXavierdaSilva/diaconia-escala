@@ -22,7 +22,9 @@ window.DiaconiaApp = (() => {
     setMes(ano, mes) {
       this.ano = ano;
       this.mes = mes;
+      if (!this.state.meta) this.state.meta = {};
       this.state.meta.mesAtual = mes;
+      this.state.meta.anoPadrao = ano;
       this.save();
       this.render();
     },
@@ -169,6 +171,7 @@ window.DiaconiaApp = (() => {
 
     render() {
       const sessao = window.DiaconiaAuth.sessao();
+      if (typeof UI.closeModal === "function") UI.closeModal();
       if (!sessao) {
         this.renderLogin();
         return;

@@ -20,7 +20,11 @@ function makeStorage() {
     removeItem: (k) => m.delete(k),
   };
 }
-const window = { localStorage: makeStorage(), sessionStorage: makeStorage() };
+const window = {
+  localStorage: makeStorage(),
+  sessionStorage: makeStorage(),
+  location: { protocol: "http:", origin: "http://localhost", pathname: "/" },
+};
 const sandbox = {
   window,
   console,
@@ -41,6 +45,8 @@ const sandbox = {
   isNaN,
   Infinity,
   undefined,
+  setTimeout,
+  clearTimeout,
   localStorage: window.localStorage,
   sessionStorage: window.sessionStorage,
 };

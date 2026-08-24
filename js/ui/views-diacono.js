@@ -431,12 +431,14 @@ window.DiaconiaViewsDiacono = (() => {
     UI().bindBulkTable(root, "avisos-rest-diacono", {
       itemLabel: "aviso(s)",
       onDelete: async (ids) => {
+        let n = 0;
         for (const id of ids) {
-          window.DiaconiaRestrictions.excluir(state, id, sessao);
+          const res = window.DiaconiaRestrictions.excluir(state, id, sessao);
+          if (res?.ok) n += 1;
         }
         app.save();
         app.render();
-        UI().toast(`${ids.length} aviso(s) excluído(s).`);
+        UI().toast(n ? `${n} aviso(s) excluído(s).` : "Nenhum aviso pôde ser excluído.");
       },
     });
 
@@ -1075,6 +1077,7 @@ window.DiaconiaViewsDiacono = (() => {
 
       if (u) {
         u.nome = dados.nome;
+        u.whatsapp = String(dados.whatsapp || "").replace(/\D/g, "");
         if (senha) {
           u.senha = senha;
           window.DiaconiaStorage.touchUsuario?.(u);

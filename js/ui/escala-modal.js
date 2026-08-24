@@ -206,6 +206,7 @@ window.DiaconiaEscalaModal = (() => {
             onChange?.();
             render(state, data, { diaconoId, isLider, onChange });
           },
+          onCancel: () => render(state, data, { diaconoId, isLider, onChange }),
         });
         return;
       }
@@ -235,7 +236,8 @@ window.DiaconiaEscalaModal = (() => {
           okText: "Embaralhar",
         });
         if (!ok) return;
-        Engine().gerarEscalaData(state, data, { equipesIds: [btn.dataset.eq] });
+        const gen = Engine().gerarEscalaData(state, data, { equipesIds: [btn.dataset.eq] });
+        if (!gen?.ok) return UI().toast(gen?.erro || "Não foi possível embaralhar.");
         window.DiaconiaHistory.add(state, {
           tipo: "embaralhar",
           mensagem: `Equipe ${btn.dataset.eq} embaralhada em ${data}.`,
@@ -247,9 +249,8 @@ window.DiaconiaEscalaModal = (() => {
         return;
       }
       if (act === "reorg" && isLider) {
-        Engine().gerarEscalaData(state, data);
-        delete esc.alertaAfetacao;
-        esc.status = Engine().statusEscala(esc, state);
+        const gen = Engine().gerarEscalaData(state, data);
+        if (!gen?.ok) return UI().toast(gen?.erro || "Não foi possível reorganizar.");
         window.DiaconiaHistory.add(state, {
           tipo: "reorganizar",
           mensagem: `Escala ${data} reorganizada após restrição.`,
@@ -261,14 +262,16 @@ window.DiaconiaEscalaModal = (() => {
         return;
       }
       if (act === "detalhe") {
-        showDetalheFuncao(state, data, btn.dataset.eq, btn.dataset.fid, diaconoId);
+        showDetalheFuncao(state, data, btn.dataset.eq, btn.dataset.fid, diaconoId, () =>
+          render(state, data, { diaconoId, isLider, onChange })
+        );
         return;
       }
       if (act === "alterar" && isLider) {
         showAlterar(state, data, btn.dataset.eq, btn.dataset.fid, () => {
           onChange?.();
           render(state, data, { diaconoId, isLider, onChange });
-        });
+        }, () => render(state, data, { diaconoId, isLider, onChange }));
       }
     });
   }
@@ -350,7 +353,7 @@ window.DiaconiaEscalaModal = (() => {
     });
   }
 
-  function showDetalheFuncao(state, data, equipeId, funcaoId, diaconoId) {
+  function showDetalheFuncao(state, data, equipeId, funcaoId, diaconoId, onClose) {
     const f = Engine().getFuncao(state, funcaoId);
     const ids = state.escalas[data]?.atribuicoes?.[equipeId]?.[funcaoId] || [];
     UI().openModal(`
@@ -366,11 +369,14 @@ window.DiaconiaEscalaModal = (() => {
       </div>
     `);
     document.getElementById("modal-root").addEventListener("click", (e) => {
-      if (e.target.closest('[data-act="ok"]')) UI().closeModal();
+      if (e.target.closest('[data-act="ok"]')) {
+        UI().closeModal();
+        onClose?.();
+      }
     });
   }
 
-  function montarManual(state, data, equipeId, { onDone } = {}) {
+  function montarManual(state, data, equipeId, { onDone, onCancel } = {}) {
     const esc = state.escalas[data];
     if (!esc) return;
 
@@ -456,6 +462,7 @@ window.DiaconiaEscalaModal = (() => {
       const act = e.target.closest("[data-act]")?.dataset.act;
       if (act === "cancel") {
         UI().closeModal();
+        onCancel?.();
         return;
       }
       if (act !== "save") return;
@@ -487,7 +494,7 @@ window.DiaconiaEscalaModal = (() => {
     });
   }
 
-  function showAlterar(state, data, equipeId, funcaoId, onDone) {
+  function showAlterar(state, data, equipeId, funcaoId, onDone, onCancel) {
     const f = Engine().getFuncao(state, funcaoId);
     const atuais = state.escalas[data]?.atribuicoes?.[equipeId]?.[funcaoId] || [];
     const qtd = f?.qtdPorEquipe || 1;
@@ -517,6 +524,7 @@ window.DiaconiaEscalaModal = (() => {
       const act = e.target.closest("[data-act]")?.dataset.act;
       if (act === "cancel") {
         UI().closeModal();
+        onCancel?.();
         return;
       }
       if (act === "save") {

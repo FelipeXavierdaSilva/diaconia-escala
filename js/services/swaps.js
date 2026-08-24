@@ -204,6 +204,9 @@ window.DiaconiaSwaps = (() => {
   function recusar(state, trocaId, sessao) {
     const t = state.trocas.find((x) => x.id === trocaId);
     if (!t) return { ok: false, erro: "Registro não encontrado." };
+    if (t.status !== "aguardando_aceite") {
+      return { ok: false, erro: "Este pedido não está aguardando aceite." };
+    }
     if (t.paraDiaconoId !== sessao.diaconoId && t.deDiaconoId !== sessao.diaconoId) {
       return { ok: false, erro: "Sem permissão para recusar este pedido." };
     }
@@ -463,11 +466,14 @@ window.DiaconiaSwaps = (() => {
         n += 1;
         continue;
       }
-      // Se a escala já mudou ou não dá para aplicar, só fecha o status
-      t.status = "aprovada";
-      t.aprovadaEm = t.aprovadaEm || new Date().toISOString();
-      t.aprovadaPor = sessao.usuarioId;
-      t.migradoSemLider = true;
+      if (t.escalaAplicada && t.escalaSnapshot) {
+        reverterSnapshotEscala(state, t.data, t.escalaSnapshot);
+      }
+      t.status = "recusada";
+      t.recusadaEm = new Date().toISOString();
+      t.escalaAplicada = false;
+      delete t.escalaSnapshot;
+      t.erroMigracao = res.erro || "Não foi possível aplicar na escala.";
       n += 1;
     }
     return n;
@@ -516,7 +522,14 @@ window.DiaconiaSwaps = (() => {
     if (t.status === "aprovada") {
       return { ok: false, erro: "Pedido já confirmado — a escala já foi atualizada." };
     }
-    // Recusa da liderança não altera a escala (só encerra o pedido).
+    if (t.status !== "aguardando_aceite" && t.status !== "aguardando_lider") {
+      return { ok: false, erro: "Este pedido já foi encerrado." };
+    }
+    if (t.escalaAplicada && t.escalaSnapshot) {
+      reverterSnapshotEscala(state, t.data, t.escalaSnapshot);
+      t.escalaAplicada = false;
+      delete t.escalaSnapshot;
+    }
     t.status = "rejeitada";
     t.rejeitadaEm = new Date().toISOString();
     Hist().add(state, {

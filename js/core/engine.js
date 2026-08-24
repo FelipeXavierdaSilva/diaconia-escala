@@ -449,7 +449,7 @@ window.DiaconiaEngine = (() => {
 
   function gerarEscalaData(state, data, { equipesIds } = {}) {
     const escala = state.escalas[data];
-    if (!escala) throw new Error("Escala não encontrada para a data.");
+    if (!escala) return { ok: false, erro: "Escala não encontrada para a data." };
     const eqs = equipesIds || escala.equipesIds || [];
     let hist = contagemHistorico(state, data);
     const atr = { ...(escala.atribuicoes || {}) };
@@ -464,9 +464,10 @@ window.DiaconiaEngine = (() => {
 
     escala.atribuicoes = atr;
     escala.problemas = problemas;
+    delete escala.alertaAfetacao;
     escala.status = statusEscala(escala, state);
     escala.gerada = true;
-    return escala;
+    return { ok: true, escala };
   }
 
   function gerarMes(state, ano, mes) {
@@ -611,7 +612,8 @@ window.DiaconiaEngine = (() => {
     );
     // manter atribuição manual, só validar problemas
     const funcao = getFuncao(state, funcaoId);
-    const qtd = funcao?.qtdPorEquipe || 1;
+    if (!funcao) return { ok: false, erro: "Função não encontrada." };
+    const qtd = funcao.qtdPorEquipe || 1;
     escala.problemas = (escala.problemas || []).filter(
       (p) => !(p.equipeId === equipeId && p.funcaoId === funcaoId)
     );
@@ -832,6 +834,13 @@ window.DiaconiaEngine = (() => {
       for (const t of state.trocas || []) {
         if (t.data === dataAtual) t.data = novaData;
       }
+      if (typeof window.DiaconiaRestrictions?.recomputarAlertaData === "function") {
+        window.DiaconiaRestrictions.recomputarAlertaData(state, dataAtual);
+        window.DiaconiaRestrictions.recomputarAlertaData(state, novaData);
+      } else {
+        delete esc.alertaAfetacao;
+        esc.status = statusEscala(esc, state);
+      }
     }
 
     return {
@@ -845,6 +854,7 @@ window.DiaconiaEngine = (() => {
 
   function excluirEscalaDia(state, data) {
     if (!state.escalas[data]) return { ok: false, erro: "Escala não encontrada." };
+    state.trocas = (state.trocas || []).filter((t) => t.data !== data);
     delete state.escalas[data];
     return { ok: true };
   }

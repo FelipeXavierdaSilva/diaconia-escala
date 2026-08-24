@@ -321,13 +321,14 @@ window.DiaconiaViewsLider = (() => {
     root.querySelector("#btn-nova")?.addEventListener("click", () => formNovaEscala(app, "culto"));
 
     const setView = (view) => {
+      app.escalaView = view;
       root.querySelectorAll(".view-tab").forEach((t) => t.classList.toggle("active", t.dataset.view === view));
       root.querySelector(".escalas-body")?.setAttribute("data-show", view);
     };
     root.querySelectorAll(".view-tab").forEach((tab) => {
       tab.addEventListener("click", () => setView(tab.dataset.view));
     });
-    setView("cal");
+    setView(app.escalaView || "cal");
 
     UI().bindBulkTable(root, "escalas-lista", {
       itemLabel: "escala(s)",
@@ -838,7 +839,10 @@ window.DiaconiaViewsLider = (() => {
         diacono.funcoesPermitidas = funcoesPermitidas;
         diacono.ativo = root.querySelector("#d-ativo").checked;
         const u = (state.usuarios || []).find((x) => x.diaconoId === diacono.id);
-        if (u) u.nome = dados.nome;
+        if (u) {
+          u.nome = dados.nome;
+          u.whatsapp = String(dados.whatsapp || "").replace(/\D/g, "");
+        }
         if (oldEq !== diacono.equipeId) {
           window.DiaconiaHistory.add(state, {
             tipo: "migracao",
@@ -998,9 +1002,16 @@ window.DiaconiaViewsLider = (() => {
     });
     root.querySelectorAll('[data-act="remove"]').forEach((btn) => {
       btn.addEventListener("click", async () => {
+        const eq = state.equipes.find((e) => e.id === btn.dataset.id);
+        const membros = (state.diaconos || []).filter((d) => d.equipeId === btn.dataset.id);
+        if (membros.length) {
+          return UI().toast(
+            `Não é possível excluir: ${membros.length} diácono(s) nesta equipe. Mova-os antes.`
+          );
+        }
         const ok = await UI().confirmDelete({
-          itemLabel: `a equipe <strong>${UI().esc(state.equipes.find((e) => e.id === btn.dataset.id)?.nome || "")}</strong>`,
-          detalhes: "Diáconos desta equipe precisarão ser migrados depois.",
+          itemLabel: `a equipe <strong>${UI().esc(eq?.nome || "")}</strong>`,
+          detalhes: "Equipes sem membros podem ser removidas com segurança.",
         });
         if (!ok) return;
         state.equipes = state.equipes.filter((e) => e.id !== btn.dataset.id);
@@ -1654,12 +1665,8 @@ window.DiaconiaViewsLider = (() => {
           });
           if (!ok) return;
           try {
-            Engine().gerarEscalaData(state, btn.dataset.data);
-            const esc = state.escalas[btn.dataset.data];
-            if (esc) {
-              delete esc.alertaAfetacao;
-              esc.status = Engine().statusEscala(esc, state);
-            }
+            const gen = Engine().gerarEscalaData(state, btn.dataset.data);
+            if (!gen?.ok) return UI().toast(gen?.erro || "Não foi possível reorganizar.");
             window.DiaconiaHistory.add(state, {
               tipo: "reorganizar",
               mensagem: `Escala ${btn.dataset.data} reorganizada após restrição.`,
@@ -1689,12 +1696,14 @@ window.DiaconiaViewsLider = (() => {
       itemLabel: "aviso(s)",
       onDelete: async (ids) => {
         const sessao = ctx(app).sessao();
+        let n = 0;
         for (const id of ids) {
-          window.DiaconiaRestrictions.excluir(state, id, sessao);
+          const res = window.DiaconiaRestrictions.excluir(state, id, sessao);
+          if (res?.ok) n += 1;
         }
         app.save();
         app.render();
-        UI().toast(`${ids.length} aviso(s) excluído(s).`);
+        UI().toast(n ? `${n} aviso(s) excluído(s).` : "Nenhum aviso pôde ser excluído.");
       },
     });
   }
@@ -2043,8 +2052,11 @@ window.DiaconiaViewsLider = (() => {
           detalhes: "A pessoa não conseguirá mais entrar com este login.",
         });
         if (!ok) return;
-        removerLiderDeUsuario(state, u.id);
-        state.usuarios = state.usuarios.filter((x) => x.id !== u.id);
+        if (u.diaconoId) removerDiaconoDoEstado(state, u.diaconoId);
+        else {
+          removerLiderDeUsuario(state, u.id);
+          state.usuarios = state.usuarios.filter((x) => x.id !== u.id);
+        }
         window.DiaconiaHistory.add(state, {
           tipo: "usuario",
           mensagem: `Usuário excluído: ${u.login}.`,
@@ -2062,9 +2074,13 @@ window.DiaconiaViewsLider = (() => {
         const me = ctx(app).sessao()?.usuarioId;
         const okIds = ids.filter((id) => id !== me);
         if (!okIds.length) return UI().toast("Não é possível excluir o usuário logado.");
-        for (const id of okIds) removerLiderDeUsuario(state, id);
-        const set = new Set(okIds);
-        state.usuarios = (state.usuarios || []).filter((u) => !set.has(u.id));
+        for (const id of okIds) {
+          const u = state.usuarios.find((x) => x.id === id);
+          if (!u) continue;
+          if (u.diaconoId) removerDiaconoDoEstado(state, u.diaconoId);
+          else removerLiderDeUsuario(state, id);
+        }
+        state.usuarios = (state.usuarios || []).filter((u) => !okIds.includes(u.id));
         window.DiaconiaHistory.add(state, {
           tipo: "usuario",
           mensagem: `${okIds.length} usuário(s) excluído(s) em massa.`,

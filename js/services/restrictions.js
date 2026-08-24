@@ -2,9 +2,37 @@ window.DiaconiaRestrictions = (() => {
   const Engine = () => window.DiaconiaEngine;
   const Hist = () => window.DiaconiaHistory;
 
+  /** Recalcula alerta de escala afetada com base em todas as restrições aprovadas do dia. */
+  function recomputarAlertaData(state, data) {
+    if (!data) return;
+    const esc = state.escalas?.[data];
+    if (!esc) return;
+
+    const aprovadas = (state.restricoes || []).filter((r) => r.status === "aprovada" && r.data === data);
+    let alerta = null;
+
+    for (const r of aprovadas) {
+      const afet = Engine().escalasAfetadasPorRestricao(state, r);
+      r.afetacoes = afet;
+      if (afet.length && !alerta) {
+        alerta = {
+          restricaoId: r.id,
+          diaconoId: r.diaconoId,
+          mensagem: "Escala afetada por restrição aprovada.",
+        };
+      }
+    }
+
+    if (alerta) esc.alertaAfetacao = alerta;
+    else delete esc.alertaAfetacao;
+    esc.status = Engine().statusEscala(esc, state);
+  }
+
   function criar(state, payload, sessao) {
-    const statusInicial =
-      payload.status || (payload.aprovarAgora ? "aprovada" : "pendente");
+    state.restricoes = state.restricoes || [];
+    const statusInicial = payload.aprovarAgora
+      ? "aprovada"
+      : payload.status || "pendente";
 
     const r = {
       id: Engine().uid("rest"),
@@ -67,25 +95,10 @@ window.DiaconiaRestrictions = (() => {
     r.revisadaPor = sessao.usuarioId;
 
     if (status === "aprovada") {
-      r.afetacoes = Engine().escalasAfetadasPorRestricao(state, r);
-      if (r.afetacoes.length) {
-        const esc = state.escalas[r.data];
-        if (esc) {
-          esc.status = "afetada";
-          esc.alertaAfetacao = {
-            restricaoId: r.id,
-            diaconoId: r.diaconoId,
-            mensagem: "Escala afetada por nova restrição aprovada.",
-          };
-        }
-      }
+      recomputarAlertaData(state, r.data);
     } else {
       r.afetacoes = [];
-      const esc = state.escalas[r.data];
-      if (esc?.alertaAfetacao?.restricaoId === restricaoId) {
-        delete esc.alertaAfetacao;
-        esc.status = Engine().statusEscala(esc, state);
-      }
+      recomputarAlertaData(state, r.data);
     }
 
     Hist().add(state, {
@@ -134,6 +147,8 @@ window.DiaconiaRestrictions = (() => {
     const r = state.restricoes.find((x) => x.id === restricaoId);
     if (!r) return { ok: false, erro: "Restrição não encontrada." };
 
+    const dataAnterior = r.data;
+
     if (payload.diaconoId) r.diaconoId = payload.diaconoId;
     if (payload.data) r.data = payload.data;
     if (payload.tipo) r.tipo = payload.tipo;
@@ -148,18 +163,8 @@ window.DiaconiaRestrictions = (() => {
     }
 
     if (r.status === "aprovada") {
-      r.afetacoes = Engine().escalasAfetadasPorRestricao(state, r);
-      if (r.afetacoes.length) {
-        const esc = state.escalas[r.data];
-        if (esc) {
-          esc.status = "afetada";
-          esc.alertaAfetacao = {
-            restricaoId: r.id,
-            diaconoId: r.diaconoId,
-            mensagem: "Escala afetada por restrição editada.",
-          };
-        }
-      }
+      recomputarAlertaData(state, r.data);
+      if (dataAnterior && dataAnterior !== r.data) recomputarAlertaData(state, dataAnterior);
     }
 
     Hist().add(state, {
@@ -177,11 +182,7 @@ window.DiaconiaRestrictions = (() => {
     const [r] = state.restricoes.splice(idx, 1);
 
     if (r.status === "aprovada") {
-      const esc = state.escalas[r.data];
-      if (esc?.alertaAfetacao?.restricaoId === restricaoId) {
-        delete esc.alertaAfetacao;
-        esc.status = Engine().statusEscala(esc, state);
-      }
+      recomputarAlertaData(state, r.data);
     }
 
     Hist().add(state, {
@@ -193,5 +194,5 @@ window.DiaconiaRestrictions = (() => {
     return { ok: true, restricao: r };
   }
 
-  return { criar, setStatus, atualizar, excluir };
+  return { criar, setStatus, atualizar, excluir, recomputarAlertaData };
 })();

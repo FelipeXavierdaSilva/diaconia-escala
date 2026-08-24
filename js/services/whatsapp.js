@@ -182,7 +182,9 @@ window.DiaconiaWhatsApp = (() => {
       return { ok: false, erro: "Número de WhatsApp inválido." };
     }
     const url = waMeUrl(n, texto);
-    const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
+    const mobile =
+      typeof navigator !== "undefined" &&
+      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
 
     if (mobile) {
       window.location.href = url;
