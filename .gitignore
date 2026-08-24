@@ -1,0 +1,12 @@
+node_modules/
+npm-debug.log*
+.DS_Store
+.env
+.env.*
+!.env.example
+.railway/
+dist/
+data/state.json
+*.log
+.cursor/
+diaconia-deploy.zip

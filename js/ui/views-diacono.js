@@ -1,0 +1,1075 @@
+/**
+ * Views do diácono — experiência enxuta:
+ * Minha escala | Avisos | Minha conta
+ */
+window.DiaconiaViewsDiacono = (() => {
+  const UI = () => window.DiaconiaUI;
+  const Cal = () => window.DiaconiaCalendar;
+  const Engine = () => window.DiaconiaEngine;
+
+  function diaconoId(app) {
+    return window.DiaconiaAuth.sessao()?.diaconoId;
+  }
+
+  function bindMes(app, root) {
+    UI().bindMesNav(app, root);
+  }
+
+  function openEscala(app, data) {
+    window.DiaconiaEscalaModal.render(app.state, data, {
+      diaconoId: diaconoId(app),
+      isLider: false,
+      onChange: () => {
+        app.save();
+        app.render();
+      },
+    });
+  }
+
+  function labelStatusRestricao(st) {
+    const map = {
+      pendente: { texto: "Aguardando o líder", tom: "warn" },
+      aprovada: { texto: "Confirmada", tom: "ok" },
+      // Recusa da liderança não altera a escala — linguagem neutra no painel do diácono
+      rejeitada: { texto: "Registrado", tom: "muted" },
+    };
+    const info = map[st] || { texto: st, tom: "muted" };
+    const extra =
+      st === "rejeitada"
+        ? `<span class="muted" style="font-size:11px;display:block;margin-top:2px">Sua escala não foi alterada</span>`
+        : "";
+    return `<span class="badge badge-${info.tom}">${UI().esc(info.texto)}</span>${extra}`;
+  }
+
+  function acoesRestricao(r) {
+    if (r.status === "rejeitada") {
+      return `<span class="muted" style="font-size:12px">Escala mantida</span>
+        ${UI().btnIcon({ icon: "trash", label: "Excluir", variant: "danger", attrs: { "data-act": "del-r", "data-id": r.id } })}`;
+    }
+    return `${UI().btnIcon({ icon: "pencil", label: "Editar", variant: "ghost", attrs: { "data-act": "edit-r", "data-id": r.id } })}
+      ${UI().btnIcon({ icon: "trash", label: "Excluir", variant: "danger", attrs: { "data-act": "del-r", "data-id": r.id } })}`;
+  }
+
+  /* ——— Minha Escala (home unificada) ——— */
+  function minhaEscala(app) {
+    const { state, ano, mes } = app;
+    const did = diaconoId(app);
+    const d = state.diaconos.find((x) => x.id === did);
+    const prox = Engine().proximaEscala(state, did);
+    const resumo = Engine().resumoMesDiacono(state, did, ano, mes);
+    const f = prox ? Engine().getFuncao(state, prox.funcaoId) : null;
+
+    const pendentes = (state.trocas || []).filter(
+      (t) => t.paraDiaconoId === did && t.status === "aguardando_aceite"
+    ).length;
+    const unread = (state.notificacoes || []).filter(
+      (n) => n.usuarioId === window.DiaconiaAuth.sessao()?.usuarioId && !n.lida
+    ).length;
+    const avisosN = pendentes + unread;
+
+    const parts = Engine().participacoesDoDiacono(state, did, ano, mes);
+    const mapParts = Object.fromEntries(parts.map((p) => [p.data, p]));
+    const grade = Cal().gradeMes(ano, mes);
+
+    const cells = grade
+      .map((iso) => {
+        if (!iso) return `<div class="cal-day empty"></div>`;
+        const day = +iso.split("-")[2];
+        const p = mapParts[iso];
+        const esc = state.escalas[iso];
+        if (p) {
+          const fn = Engine().getFuncao(state, p.funcaoId);
+          return `<div class="cal-day has-event mine-day" data-data="${iso}" title="${UI().esc(fn?.nome || "")}">
+            <span class="n">${day}</span>
+            <span class="cal-fn">${UI().esc(fn?.emoji || "●")}</span>
+          </div>`;
+        }
+        if (esc) {
+          return `<div class="cal-day has-event" data-data="${iso}" style="opacity:.5" title="Há culto — você não está escalado">
+            <span class="n">${day}</span>
+            <span class="mark" style="background:var(--muted)"></span>
+          </div>`;
+        }
+        return `<div class="cal-day"><span class="n">${day}</span></div>`;
+      })
+      .join("");
+
+    const rows = resumo.partes
+      .map((p) => {
+        const fn = Engine().getFuncao(state, p.funcaoId);
+        return `<tr data-data="${p.data}">
+          <td>${UI().esc(Cal().formatBRCurto(p.data))}<div class="muted" style="font-size:12px">${UI().esc(Cal().diaSemana(p.data))}</div></td>
+          <td><strong>${UI().esc((fn?.emoji || "") + " " + (fn?.nome || ""))}</strong></td>
+          <td>${UI().esc(fn?.horario || p.escala.horario)}</td>
+        </tr>`;
+      })
+      .join("");
+
+    return `
+      <div class="topbar">
+        <div>
+          <h1>Olá, ${UI().esc(d?.nome || "")}</h1>
+          <p class="sub">Quando você serve, o que faz e a que horas precisa chegar.</p>
+        </div>
+        <div class="toolbar">${UI().mesSelect(ano, mes)}</div>
+      </div>
+
+      ${
+        avisosN
+          ? `<div class="alert alert-warn diacono-alert" style="margin-bottom:14px">
+              Você tem <strong>${avisosN}</strong> aviso(s) pendente(s).
+              <button type="button" class="btn btn-ghost btn-sm" id="btn-ir-avisos" style="margin-left:8px">Ver avisos</button>
+            </div>`
+          : ""
+      }
+
+      <div class="grid grid-2 diacono-home-grid" style="margin-bottom:16px">
+        <div class="panel hero-next">
+          <p class="eyebrow" style="opacity:.85;letter-spacing:.12em;font-size:11px;font-weight:700;text-transform:uppercase;margin:0 0 6px">Próximo culto</p>
+          ${
+            prox
+              ? `
+            <h2>${UI().esc(Cal().diaSemana(prox.data))} — ${UI().esc(Cal().formatBR(prox.data))}</h2>
+            <p class="meta">${UI().esc(prox.escala.nome)}${
+              UI().nomeEquipePublico(state, prox.equipeId)
+                ? ` · ${UI().esc(UI().nomeEquipePublico(state, prox.equipeId))}`
+                : ""
+            }</p>
+            <div class="funcao-destaque">
+              Sua função<br/>
+              ${UI().esc((f?.emoji || "") + " " + (f?.nome || ""))}
+              <div style="font-size:14px;font-family:var(--font-body);opacity:.9;margin-top:6px;font-weight:500">Chegar às ${UI().esc(f?.horario || prox.escala.horario)}</div>
+            </div>
+            <div class="toolbar" style="margin-top:14px">
+              <button class="btn btn-accent" id="btn-det-prox" data-data="${prox.data}">Ver detalhes</button>
+              <button class="btn btn-ghost" id="btn-nao-posso" data-data="${prox.data}">Não posso ir</button>
+            </div>`
+              : `<h2>Nenhum culto futuro</h2><p class="meta">Quando a liderança gerar a escala, ela aparece aqui.</p>`
+          }
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h2>${UI().esc(Cal().nomeMes(mes))} ${ano}</h2></div>
+          <p class="muted" style="margin:0 0 10px;font-size:13px">Destaque = você está escalado. Cinza = há culto, mas não é a sua vez.</p>
+          <div class="cal-wrap">
+            <div class="cal cal-fit cal-diacono">
+              ${Cal().DIAS_CURTOS.map((x) => `<div class="cal-head">${x}</div>`).join("")}
+              ${cells}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-bottom:16px">
+        <div class="panel-head">
+          <h2>Suas escalas neste mês</h2>
+          <div class="toolbar">
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-atalho-rest">Avisar que não posso</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-atalho-troca">Pedir cobertura</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Data</th><th>Sua função</th><th>Horário</th></tr></thead>
+            <tbody id="tbl-minha">
+              ${
+                rows ||
+                `<tr class="no-click"><td colspan="3" class="empty">Você ainda não está escalado neste mês.</td></tr>`
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+
+  function bindMinhaEscala(app, root) {
+    bindMes(app, root);
+
+    root.querySelector("#btn-ir-avisos")?.addEventListener("click", () => {
+      app.page = "avisos";
+      app.render();
+    });
+
+    root.querySelector("#btn-det-prox")?.addEventListener("click", (e) => {
+      openEscala(app, e.currentTarget.dataset.data);
+    });
+
+    root.querySelector("#btn-nao-posso")?.addEventListener("click", (e) => {
+      escolherMotivoNaoPosso(app, { data: e.currentTarget.dataset.data });
+    });
+
+    root.querySelector("#btn-atalho-rest")?.addEventListener("click", () => escolherMotivoNaoPosso(app));
+    root.querySelector("#btn-atalho-troca")?.addEventListener("click", () => {
+      formTroca(app);
+    });
+
+    root.querySelector("#tbl-minha")?.addEventListener("click", (e) => {
+      const tr = e.target.closest("tr[data-data]");
+      if (tr) openEscala(app, tr.dataset.data);
+    });
+
+    root.querySelectorAll(".cal-day[data-data]").forEach((el) => {
+      el.addEventListener("click", () => openEscala(app, el.dataset.data));
+    });
+  }
+
+  /* ——— Avisos (restrições + trocas + notificações) ——— */
+  function avisos(app) {
+    const { state } = app;
+    const did = diaconoId(app);
+    const sessao = window.DiaconiaAuth.sessao();
+    const uid = sessao?.usuarioId;
+
+    const minhasRest = (state.restricoes || [])
+      .filter((r) => r.diaconoId === did)
+      .sort((a, b) => String(b.data).localeCompare(String(a.data)));
+
+    const minhasTrocas = (state.trocas || [])
+      .filter((t) => t.deDiaconoId === did || t.paraDiaconoId === did)
+      .sort((a, b) => String(b.data).localeCompare(String(a.data)));
+
+    const pendentes = minhasTrocas.filter(
+      (t) => t.paraDiaconoId === did && t.status === "aguardando_aceite"
+    );
+
+    const listaNotif = (state.notificacoes || []).filter((n) => n.usuarioId === uid);
+    const pendenteIds = new Set(pendentes.map((t) => t.id));
+
+    const cardsPendentes = pendentes.map((t) => cardPedidoTroca(state, t)).join("");
+
+    const notifItems = listaNotif
+      .filter((n) => !(n.meta?.trocaId && pendenteIds.has(n.meta.trocaId)))
+      .slice(0, 12)
+      .map(
+        (n) => `<div class="panel" style="padding:14px;opacity:${n.lida ? 0.7 : 1}">
+        <strong>${UI().esc(n.titulo)}</strong>
+        <p style="margin:6px 0 0">${UI().esc(n.corpo)}</p>
+        <p class="muted" style="font-size:12px;margin:6px 0 0">${UI().esc(new Date(n.em).toLocaleString("pt-BR"))}</p>
+      </div>`
+      )
+      .join("");
+
+    listaNotif.forEach((n) => {
+      n.lida = true;
+    });
+    app.save();
+
+    const tipoRest = {
+      indisponivel: "Não posso participar",
+      funcao: "Não posso fazer uma função",
+      horario: "Chego mais tarde",
+      outro: "Outro",
+    };
+
+    const rowsRest = minhasRest
+      .map(
+        (r) => `<tr class="no-click">
+        <td>${UI().esc(Cal().formatBR(r.data))}</td>
+        <td>${UI().esc(tipoRest[r.tipo] || r.tipo)}</td>
+        <td>${UI().esc(r.observacao || "—")}</td>
+        <td>${labelStatusRestricao(r.status)}</td>
+        <td class="toolbar">${acoesRestricao(r)}</td>
+      </tr>`
+      )
+      .join("");
+
+    const rowsTroca = minhasTrocas
+      .map((t) => {
+        const tipo =
+          t.modalidade === "cobertura"
+            ? `<span class="badge badge-warn">Cobertura</span>`
+            : `<span class="badge badge-ok">Troca</span>`;
+        const seta = t.modalidade === "cobertura" ? "← cobre" : "↔";
+        return `<tr class="no-click">
+          <td>${UI().esc(Cal().formatBR(t.data))}</td>
+          <td>${tipo}</td>
+          <td>${UI().esc(UI().nomeDiacono(state, t.deDiaconoId))} ${seta} ${UI().esc(UI().nomeDiacono(state, t.paraDiaconoId))}</td>
+          <td>${UI().esc(UI().nomeFuncao(state, t.funcaoId))}</td>
+          <td>${UI().badgeTroca(t.status, { visaoDiacono: true })}${
+            t.status === "rejeitada"
+              ? `<span class="muted" style="font-size:11px;display:block;margin-top:2px">Sua escala não mudou</span>`
+              : ""
+          }</td>
+          <td class="toolbar">${acoesTroca(t, did)}</td>
+        </tr>`;
+      })
+      .join("");
+
+    return `
+      <div class="topbar">
+        <div>
+          <h1>Avisos</h1>
+          <p class="sub">Não posso ir, pedidos de cobertura e mensagens da liderança.</p>
+        </div>
+        <div class="toolbar">
+          <button class="btn btn-ghost" id="btn-nova-rest">Não posso ir</button>
+          <button class="btn btn-accent" id="btn-nova-troca">Pedir cobertura</button>
+        </div>
+      </div>
+
+      ${
+        cardsPendentes
+          ? `<div style="margin-bottom:16px">
+              <h2 style="font-size:16px;margin:0 0 10px">Precisam da sua resposta</h2>
+              <div class="grid">${cardsPendentes}</div>
+            </div>`
+          : ""
+      }
+
+      <div class="panel" style="margin-bottom:16px">
+        <div class="panel-head"><h2>Quando não posso servir</h2></div>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Data</th><th>Motivo</th><th>Obs.</th><th>Status</th><th></th></tr></thead>
+          <tbody>${rowsRest || `<tr class="no-click"><td colspan="5" class="empty">Nenhum aviso enviado.</td></tr>`}</tbody>
+        </table></div>
+      </div>
+
+      <div class="panel" style="margin-bottom:16px">
+        <div class="panel-head"><h2>Coberturas e trocas</h2></div>
+        <p class="muted" style="margin:0 0 10px;font-size:13px">
+          <strong>Cobertura</strong> = alguém assume no seu lugar.
+          <strong>Troca</strong> = vocês permutam funções.
+        </p>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Data</th><th>Tipo</th><th>Pessoas</th><th>Função</th><th>Status</th><th></th></tr></thead>
+          <tbody>${rowsTroca || `<tr class="no-click"><td colspan="6" class="empty">Nenhum pedido.</td></tr>`}</tbody>
+        </table></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>Mensagens</h2></div>
+        <div class="grid">${notifItems || `<div class="empty muted">Nenhuma mensagem.</div>`}</div>
+      </div>`;
+  }
+
+  function bindAvisos(app, root) {
+    const { state } = app;
+
+    root.querySelector("#btn-nova-rest")?.addEventListener("click", () => escolherMotivoNaoPosso(app));
+    root.querySelector("#btn-nova-troca")?.addEventListener("click", () => formTroca(app));
+
+    if (app._abrirTroca) {
+      app._abrirTroca = false;
+      formTroca(app);
+    }
+
+    root.querySelectorAll('[data-act="edit-r"]').forEach((btn) => {
+      btn.addEventListener("click", () => {
+        formRestricao(app, state.restricoes.find((x) => x.id === btn.dataset.id));
+      });
+    });
+
+    root.querySelectorAll('[data-act="del-r"]').forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const r = state.restricoes.find((x) => x.id === btn.dataset.id);
+        if (!r) return;
+        const ok = await UI().confirmDelete({
+          itemLabel: `seu aviso de <strong>${UI().esc(Cal().formatBR(r.data))}</strong>`,
+        });
+        if (!ok) return;
+        const res = window.DiaconiaRestrictions.excluir(state, r.id, window.DiaconiaAuth.sessao());
+        if (!res.ok) return UI().toast(res.erro);
+        app.save();
+        app.render();
+        UI().toast("Aviso removido.");
+      });
+    });
+
+    root.querySelectorAll('[data-act="aceitar"], [data-act="recusar"]').forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const res =
+          btn.dataset.act === "aceitar"
+            ? window.DiaconiaSwaps.aceitar(state, btn.dataset.id, window.DiaconiaAuth.sessao())
+            : window.DiaconiaSwaps.recusar(state, btn.dataset.id, window.DiaconiaAuth.sessao());
+        if (!res.ok) return UI().toast(res.erro);
+        app.save();
+        app.render();
+        UI().toast(btn.dataset.act === "aceitar" ? "Aceito — escala atualizada." : "Pedido recusado.");
+      });
+    });
+
+    root.querySelectorAll('[data-act="aceitar-troca"], [data-act="recusar-troca"]').forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const aceitar = btn.dataset.act === "aceitar-troca";
+        const res = aceitar
+          ? window.DiaconiaSwaps.aceitar(state, btn.dataset.id, window.DiaconiaAuth.sessao())
+          : window.DiaconiaSwaps.recusar(state, btn.dataset.id, window.DiaconiaAuth.sessao());
+        if (!res.ok) return UI().toast(res.erro);
+        app.save();
+        app.render();
+        UI().toast(aceitar ? "Aceito — escala atualizada." : "Pedido recusado.");
+      });
+    });
+
+    root.querySelectorAll('[data-act="edit-t"]').forEach((btn) => {
+      btn.addEventListener("click", () => {
+        formTroca(app, state.trocas.find((x) => x.id === btn.dataset.id));
+      });
+    });
+
+    root.querySelectorAll('[data-act="del-t"]').forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const t = state.trocas.find((x) => x.id === btn.dataset.id);
+        if (!t) return;
+        const ok = await UI().confirmDelete({
+          itemLabel: `o pedido em <strong>${UI().esc(Cal().formatBR(t.data))}</strong>`,
+        });
+        if (!ok) return;
+        const res = window.DiaconiaSwaps.excluir(state, t.id, window.DiaconiaAuth.sessao());
+        if (!res.ok) return UI().toast(res.erro);
+        app.save();
+        app.render();
+        UI().toast("Pedido excluído.");
+      });
+    });
+  }
+
+  /**
+   * Escolha inicial de "Não posso ir":
+   * emergência | outro ministério | pedir cobertura
+   */
+  function escolherMotivoNaoPosso(app, opts = {}) {
+    const dataHint = opts.data
+      ? `<p class="muted" style="margin:0 0 12px">Referente a <strong>${UI().esc(Cal().formatBR(opts.data))}</strong></p>`
+      : "";
+
+    UI().openModal(`
+      <h2>Não posso ir</h2>
+      ${dataHint}
+      <p class="muted" style="margin-top:0">O que aconteceu?</p>
+      <div class="choice-stack">
+        <button type="button" class="btn btn-choice" data-act="emergencia">
+          <strong>Tive uma emergência</strong>
+          <span>Avisar a liderança com urgência</span>
+        </button>
+        <button type="button" class="btn btn-choice" data-act="ministerio">
+          <strong>Estou em outro ministério</strong>
+          <span>Já tenho escala em outro lugar neste dia</span>
+        </button>
+        <button type="button" class="btn btn-choice" data-act="cobertura">
+          <strong>Pedir cobertura</strong>
+          <span>Alguém assume no meu lugar</span>
+        </button>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
+      </div>
+    `);
+
+    const m = document.getElementById("modal-root");
+    m.addEventListener("click", (e) => {
+      const act = e.target.closest("[data-act]")?.dataset.act;
+      if (!act) return;
+      e.stopPropagation();
+      if (act === "cancel") return UI().closeModal();
+      if (act === "emergencia") {
+        UI().closeModal();
+        setTimeout(
+          () =>
+            formRestricaoRapida(app, {
+              data: opts.data,
+              motivo: "emergencia",
+              titulo: "Tive uma emergência",
+              obsPadrao: "Emergência",
+            }),
+          0
+        );
+        return;
+      }
+      if (act === "ministerio") {
+        UI().closeModal();
+        setTimeout(
+          () =>
+            formRestricaoRapida(app, {
+              data: opts.data,
+              motivo: "ministerio",
+              titulo: "Estou em outro ministério",
+              obsPadrao: "Escalado em outro ministério",
+            }),
+          0
+        );
+        return;
+      }
+      if (act === "cobertura") {
+        UI().closeModal();
+        setTimeout(() => formTroca(app, null, { data: opts.data }), 0);
+      }
+    });
+  }
+
+  function enviarAvisoRapido(app, { dataSel, motivo, obsPadrao, obsRaw }) {
+    const { state } = app;
+    let obs = (obsRaw || "").trim();
+    if (!obs) obs = obsPadrao || "";
+    if (motivo === "emergencia" && !/emergência/i.test(obs)) {
+      obs = obs ? `Emergência — ${obs}` : "Emergência";
+    }
+    if (motivo === "ministerio" && !/ministério/i.test(obs)) {
+      obs = obs ? `Outro ministério — ${obs}` : "Escalado em outro ministério";
+    }
+    return window.DiaconiaRestrictions.criar(
+      state,
+      {
+        data: dataSel,
+        tipo: "indisponivel",
+        funcaoId: null,
+        horarioChegada: null,
+        observacao: obs,
+        status: "pendente",
+      },
+      window.DiaconiaAuth.sessao()
+    );
+  }
+
+  function oferecerCoberturaAposAviso(app, dataSel, { motivo, irDireto = false } = {}) {
+    const { state } = app;
+    const did = diaconoId(app);
+    const naEscala = Engine().diaconoEstaEscaladoNaData(state, did, dataSel);
+
+    if (!naEscala) {
+      UI().toast("Aviso enviado — aguardando o líder.");
+      app.page = "avisos";
+      app.render();
+      return;
+    }
+
+    if (motivo === "ministerio" || irDireto) {
+      UI().toast("Aviso enviado.");
+      formTroca(app, null, { data: dataSel });
+      return;
+    }
+
+    UI().openModal(`
+      <h2>Aviso enviado</h2>
+      <p>A liderança foi notificada.</p>
+      <p>Você está escalado em <strong>${UI().esc(Cal().formatBR(dataSel))}</strong>. A escala <strong>não muda sozinha</strong> — se precisar de alguém no seu lugar, peça cobertura.</p>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" data-act="ok">Estou ciente, mas não consigo agora</button>
+        <button class="btn btn-accent" data-act="cobertura">Pedir cobertura</button>
+      </div>
+    `);
+    const a = document.getElementById("modal-root");
+    a.addEventListener("click", (ev) => {
+      const x = ev.target.closest("[data-act]")?.dataset.act;
+      if (x === "ok") {
+        UI().closeModal();
+        app.page = "avisos";
+        app.render();
+      }
+      if (x === "cobertura") {
+        UI().closeModal();
+        formTroca(app, null, { data: dataSel });
+      }
+    });
+  }
+
+  /** Formulário curto: data + observação, sempre tipo indisponível */
+  function formRestricaoRapida(app, { data, motivo, titulo, obsPadrao }) {
+    const { state } = app;
+    const did = diaconoId(app);
+    const dataRef = data || "";
+    const naEscala = dataRef && Engine().diaconoEstaEscaladoNaData(state, did, dataRef);
+    const ehMinisterio = motivo === "ministerio";
+
+    const acoesHtml = ehMinisterio
+      ? `<button class="btn btn-ghost" data-act="send-only">Só avisar a liderança</button>
+         <button class="btn btn-accent" data-act="send-cobertura">Continuar e pedir cobertura</button>`
+      : `<button class="btn btn-accent" data-act="send">Enviar aviso</button>`;
+
+    const dicaHtml = ehMinisterio
+      ? naEscala
+        ? `<p class="muted" style="margin-top:0">Informe o dia. Depois você pode pedir cobertura na diaconia.</p>`
+        : `<p class="muted" style="margin-top:0">Informe o dia. A liderança será avisada.</p>`
+      : `<p class="muted" style="margin-top:0">Informe o dia. A liderança será avisada.</p>`;
+
+    UI().openModal(`
+      <h2>${UI().esc(titulo)}</h2>
+      ${dicaHtml}
+      <label class="field"><span>Data</span><input type="date" id="r-data" value="${UI().esc(dataRef)}" required/></label>
+      <label class="field"><span>Detalhe (opcional)</span>
+        <textarea id="r-obs" class="textarea" rows="3" placeholder="Algo a mais para a liderança saber…">${UI().esc(obsPadrao || "")}</textarea>
+      </label>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" data-act="voltar">Voltar</button>
+        ${acoesHtml}
+      </div>
+    `);
+
+    const m = document.getElementById("modal-root");
+    m.addEventListener("click", (e) => {
+      const act = e.target.closest("[data-act]")?.dataset.act;
+      if (act === "voltar") {
+        UI().closeModal();
+        escolherMotivoNaoPosso(app, { data });
+        return;
+      }
+      const enviar =
+        act === "send" || act === "send-only" || act === "send-cobertura";
+      if (!enviar) return;
+
+      const dataSel = m.querySelector("#r-data").value;
+      if (!dataSel) return UI().toast("Informe a data.");
+      const obsRaw = m.querySelector("#r-obs").value;
+
+      const res = enviarAvisoRapido(app, { dataSel, motivo, obsPadrao, obsRaw });
+      if (res.ok === false) return UI().toast(res.erro);
+      app.save();
+      UI().closeModal();
+
+      const querCobertura = act === "send-cobertura";
+      if (querCobertura) {
+        oferecerCoberturaAposAviso(app, dataSel, { motivo, irDireto: true });
+        return;
+      }
+
+      if (act === "send-only") {
+        UI().toast("Aviso enviado — aguardando o líder.");
+        app.page = "avisos";
+        app.render();
+        return;
+      }
+
+      if (res.alertaEscalaExistente || Engine().diaconoEstaEscaladoNaData(state, did, dataSel)) {
+        oferecerCoberturaAposAviso(app, dataSel, { motivo });
+      } else {
+        UI().toast("Aviso enviado — aguardando o líder.");
+        app.page = "avisos";
+        app.render();
+      }
+    });
+  }
+
+  function formRestricao(app, restricao = null, opts = {}) {
+    const { state } = app;
+    const tipo = restricao?.tipo || "indisponivel";
+    const dataPadrao = restricao?.data || opts.data || "";
+    const avancado = tipo !== "indisponivel";
+    const funOpts = state.funcoes
+      .map(
+        (f) =>
+          `<option value="${f.id}" ${restricao?.funcaoId === f.id ? "selected" : ""}>${UI().esc(f.emoji + " " + f.nome)}</option>`
+      )
+      .join("");
+
+    UI().openModal(`
+      <h2>${restricao ? "Editar aviso" : "Não posso ir"}</h2>
+      <p class="muted" style="margin-top:0">A liderança será avisada. Se a escala já existir, fale com um líder se precisar de cobertura urgente.</p>
+      <label class="field"><span>Data</span><input type="date" id="r-data" value="${UI().esc(dataPadrao)}"/></label>
+      <label class="field"><span>Observação (opcional)</span>
+        <textarea id="r-obs" class="textarea" rows="3" placeholder="Ex.: Escala em outro ministério, viagem, compromisso…">${UI().esc(restricao?.observacao || "")}</textarea>
+      </label>
+      <details class="adv-details" ${avancado ? "open" : ""}>
+        <summary>Opções avançadas</summary>
+        <p style="margin:10px 0 6px"><strong>Tipo</strong></p>
+        <div class="radio-list">
+          <label><input type="radio" name="rtype" value="indisponivel" ${tipo === "indisponivel" ? "checked" : ""}/> Não posso participar neste dia</label>
+          <label><input type="radio" name="rtype" value="funcao" ${tipo === "funcao" ? "checked" : ""}/> Não posso fazer determinada função</label>
+          <label><input type="radio" name="rtype" value="horario" ${tipo === "horario" ? "checked" : ""}/> Consigo chegar só a partir de certo horário</label>
+          <label><input type="radio" name="rtype" value="outro" ${tipo === "outro" ? "checked" : ""}/> Outro</label>
+        </div>
+        <label class="field" id="wrap-fn"><span>Função</span><select id="r-fn" class="select">${funOpts}</select></label>
+        <label class="field" id="wrap-hora"><span>Consigo chegar a partir de</span><input id="r-hora" value="${UI().esc(restricao?.horarioChegada || "18:30")}"/></label>
+      </details>
+      ${
+        restricao?.status && restricao.status !== "pendente"
+          ? `<div class="alert alert-warn">Ao salvar, o aviso volta a aguardar aprovação da liderança.</div>`
+          : ""
+      }
+      <div class="modal-actions">
+        ${restricao ? `<button class="btn btn-danger" data-act="delete" style="margin-right:auto">Excluir</button>` : ""}
+        <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
+        <button class="btn btn-accent" data-act="send">${restricao ? "Salvar" : "Enviar aviso"}</button>
+      </div>
+    `);
+
+    const m = document.getElementById("modal-root");
+    const sync = () => {
+      const t = m.querySelector('input[name="rtype"]:checked')?.value || "indisponivel";
+      m.querySelector("#wrap-fn").style.display = t === "funcao" ? "" : "none";
+      m.querySelector("#wrap-hora").style.display = t === "horario" ? "" : "none";
+    };
+    m.querySelectorAll('input[name="rtype"]').forEach((r) => r.addEventListener("change", sync));
+    sync();
+
+    m.addEventListener("click", async (e) => {
+      const act = e.target.closest("[data-act]")?.dataset.act;
+      if (act === "cancel") return UI().closeModal();
+
+      if (act === "delete" && restricao) {
+        UI().closeModal();
+        const ok = await UI().confirmDelete({
+          itemLabel: `seu aviso de <strong>${UI().esc(Cal().formatBR(restricao.data))}</strong>`,
+        });
+        if (!ok) return;
+        const resDel = window.DiaconiaRestrictions.excluir(state, restricao.id, window.DiaconiaAuth.sessao());
+        if (!resDel.ok) return UI().toast(resDel.erro);
+        app.save();
+        app.render();
+        UI().toast("Aviso removido.");
+        return;
+      }
+
+      if (act !== "send") return;
+      const tipoSel = m.querySelector('input[name="rtype"]:checked')?.value || "indisponivel";
+      const data = m.querySelector("#r-data").value;
+      if (!data) return UI().toast("Informe a data.");
+
+      const payload = {
+        data,
+        tipo: tipoSel,
+        funcaoId: tipoSel === "funcao" ? m.querySelector("#r-fn").value : null,
+        horarioChegada: tipoSel === "horario" ? m.querySelector("#r-hora").value : null,
+        observacao: m.querySelector("#r-obs").value.trim(),
+        status: "pendente",
+      };
+
+      let res;
+      if (restricao) {
+        res = window.DiaconiaRestrictions.atualizar(
+          state,
+          restricao.id,
+          payload,
+          window.DiaconiaAuth.sessao()
+        );
+      } else {
+        res = window.DiaconiaRestrictions.criar(state, payload, window.DiaconiaAuth.sessao());
+      }
+
+      if (res.ok === false) return UI().toast(res.erro);
+      app.save();
+      UI().closeModal();
+
+      if (!restricao && res.alertaEscalaExistente) {
+        UI().openModal(`
+          <h2>Aviso enviado</h2>
+          <p>A liderança foi notificada.</p>
+          <p>A escala já montada <strong>não muda sozinha</strong> — se precisar de cobertura urgente, fale com um líder.</p>
+          <div class="modal-actions">
+            <button class="btn btn-ghost" data-act="ok">Estou ciente, mas não consigo agora</button>
+            <button class="btn btn-accent" data-act="falar">Falar com um líder</button>
+          </div>
+        `);
+        const a = document.getElementById("modal-root");
+        a.addEventListener("click", (ev) => {
+          const x = ev.target.closest("[data-act]")?.dataset.act;
+          if (x === "ok") {
+            UI().closeModal();
+            app.page = "avisos";
+            app.render();
+          }
+          if (x === "falar") {
+            UI().closeModal();
+            app.page = "conta";
+            app.render();
+            setTimeout(() => document.getElementById("sec-lideres")?.scrollIntoView({ behavior: "smooth" }), 50);
+          }
+        });
+      } else {
+        UI().toast(restricao ? "Aviso atualizado." : "Aviso enviado — aguardando o líder.");
+        app.page = "avisos";
+        app.render();
+      }
+    });
+  }
+
+  function acoesTroca(t, did) {
+    const btns = [];
+    if (t.status === "aguardando_aceite" && t.paraDiaconoId === did) {
+      btns.push(
+        UI().btnIcon({ icon: "check", label: "Aceitar", variant: "primary", attrs: { "data-act": "aceitar", "data-id": t.id } })
+      );
+      btns.push(
+        UI().btnIcon({ icon: "x", label: "Recusar", variant: "danger", attrs: { "data-act": "recusar", "data-id": t.id } })
+      );
+    }
+    if (t.deDiaconoId === did && t.status === "aguardando_aceite") {
+      btns.push(
+        UI().btnIcon({ icon: "pencil", label: "Editar", variant: "ghost", attrs: { "data-act": "edit-t", "data-id": t.id } })
+      );
+    }
+    if (t.deDiaconoId === did && t.status !== "aprovada") {
+      btns.push(
+        UI().btnIcon({ icon: "trash", label: "Excluir", variant: "danger", attrs: { "data-act": "del-t", "data-id": t.id } })
+      );
+    }
+    if (t.deDiaconoId === did && t.status === "rejeitada") {
+      return btns.length
+        ? btns.join("")
+        : `<span class="muted" style="font-size:12px">Escala mantida</span>`;
+    }
+    return btns.length ? btns.join("") : "—";
+  }
+
+  function formTroca(app, troca = null, pref = {}) {
+    const { state, ano, mes } = app;
+    const did = diaconoId(app);
+    let parts = Engine().participacoesDoDiacono(state, did, ano, mes);
+
+    if (pref.data) {
+      for (const p of Engine().participacoesNaData(state, did, pref.data)) {
+        const chave = `${p.data}|${p.equipeId}|${p.funcaoId}`;
+        if (!parts.some((x) => `${x.data}|${x.equipeId}|${x.funcaoId}` === chave)) {
+          parts.push(p);
+        }
+      }
+      parts.sort((a, b) => a.data.localeCompare(b.data));
+    }
+
+    if (troca) {
+      const chave = `${troca.data}|${troca.equipeId}|${troca.funcaoId}`;
+      const tem = parts.some((p) => `${p.data}|${p.equipeId}|${p.funcaoId}` === chave);
+      if (!tem) {
+        parts = [
+          { data: troca.data, equipeId: troca.equipeId, funcaoId: troca.funcaoId },
+          ...parts,
+        ];
+      }
+    }
+
+    if (!parts.length) {
+      UI().toast("Você não tem escalas neste mês para pedir cobertura.");
+      return;
+    }
+
+    let valorAtual = troca ? `${troca.data}|${troca.equipeId}|${troca.funcaoId}` : null;
+    if (!valorAtual && pref.data) {
+      const match = parts.find((p) => p.data === pref.data);
+      if (match) valorAtual = `${match.data}|${match.equipeId}|${match.funcaoId}`;
+    }
+
+    const opts = parts
+      .map((p) => {
+        const f = Engine().getFuncao(state, p.funcaoId);
+        const val = `${p.data}|${p.equipeId}|${p.funcaoId}`;
+        return `<option value="${val}" ${val === valorAtual ? "selected" : ""}>${Cal().formatBR(p.data)} — ${f?.nome || p.funcaoId}</option>`;
+      })
+      .join("");
+
+    const outros = state.diaconos
+      .filter((d) => d.id !== did && d.ativo)
+      .map((d) => {
+        const eqPub = UI().nomeEquipePublico(state, d.equipeId);
+        const wa = d.whatsapp ? "" : " · sem WhatsApp";
+        const eqLabel = eqPub ? ` (${UI().esc(eqPub)})` : "";
+        return `<option value="${d.id}" ${troca?.paraDiaconoId === d.id ? "selected" : ""}>${UI().esc(d.nome)}${eqLabel}${UI().esc(wa)}</option>`;
+      })
+      .join("");
+
+    const mod = troca?.modalidade === "troca" ? "troca" : "cobertura";
+
+    UI().openModal(`
+      <h2>${troca ? "Editar pedido" : "Pedir cobertura"}</h2>
+      <p class="muted" style="margin-top:0">Ao enviar, o WhatsApp da pessoa abre com o pedido e o link do portal para ela entrar e aceitar.</p>
+      <p><strong>O que você precisa?</strong></p>
+      <div class="radio-list">
+        <label><input type="radio" name="t-mod" value="cobertura" ${mod === "cobertura" ? "checked" : ""}/>
+          <strong>Alguém me cobre</strong> — a pessoa assume e eu saio</label>
+        <label><input type="radio" name="t-mod" value="troca" ${mod === "troca" ? "checked" : ""}/>
+          <strong>Trocar de função</strong> — permutamos no mesmo culto</label>
+      </div>
+      <label class="field"><span>Em qual escala</span><select id="t-part" class="select">${opts}</select></label>
+      <label class="field"><span>Com quem</span><select id="t-com" class="select">${outros}</select></label>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
+        <button class="btn btn-accent" data-act="send">${troca ? "Salvar" : "Enviar pedido"}</button>
+      </div>
+    `);
+    const m = document.getElementById("modal-root");
+    m.addEventListener("click", (e) => {
+      const act = e.target.closest("[data-act]")?.dataset.act;
+      if (act === "cancel") return UI().closeModal();
+      if (act !== "send") return;
+      const [data, equipeId, funcaoId] = m.querySelector("#t-part").value.split("|");
+      const modalidade = m.querySelector('input[name="t-mod"]:checked')?.value || "cobertura";
+      const payload = {
+        data,
+        equipeId,
+        funcaoId,
+        paraDiaconoId: m.querySelector("#t-com").value,
+        modalidade,
+      };
+      const res = troca
+        ? window.DiaconiaSwaps.atualizar(state, troca.id, payload, window.DiaconiaAuth.sessao())
+        : window.DiaconiaSwaps.solicitar(state, payload, window.DiaconiaAuth.sessao());
+      if (!res.ok) return UI().toast(res.erro);
+      app.save();
+      UI().closeModal();
+
+      if (!troca && res.troca) {
+        const wa = res.whatsapp;
+        if (wa?.ok) {
+          if (wa.via === "api") {
+            UI().toast(
+              wa.pendenteApi
+                ? `Pedido criado. WhatsApp enfileirado (API ainda não configurada).`
+                : `Pedido criado. WhatsApp enviado para ${wa.nome || "o destinatário"}.`
+            );
+          } else {
+            UI().toast(`Pedido criado. Abrindo WhatsApp de ${wa.nome || "o destinatário"}…`);
+          }
+        } else if (wa && !wa.ignorado) {
+          UI().toast(`Pedido criado no portal. ${wa.erro || "WhatsApp não enviado."}`);
+        } else {
+          UI().toast("Pedido enviado — a escala já mostra os nomes atualizados.");
+        }
+      } else {
+        UI().toast(troca ? "Pedido atualizado." : "Pedido enviado.");
+      }
+
+      app.page = "avisos";
+      app.render();
+    });
+  }
+
+  function cardPedidoTroca(state, t) {
+    const cobertura = t.modalidade === "cobertura";
+    const tipo = cobertura ? "Pedido de cobertura" : "Pedido de troca";
+    const de = UI().nomeDiacono(state, t.deDiaconoId);
+    const fn = UI().nomeFuncao(state, t.funcaoId);
+    const eq = UI().nomeEquipePublico(state, t.equipeId);
+    const corpo = cobertura
+      ? `${de} pediu para você cobrir <strong>${UI().esc(fn)}</strong> em ${UI().esc(Cal().formatBR(t.data))}${eq ? ` (${UI().esc(eq)})` : ""}.`
+      : `${de} pediu troca de <strong>${UI().esc(fn)}</strong> em ${UI().esc(Cal().formatBR(t.data))}${eq ? ` (${UI().esc(eq)})` : ""}.`;
+
+    return `<div class="panel notif-action" style="padding:14px">
+      <div class="toolbar" style="justify-content:space-between;margin-bottom:6px">
+        <strong>${UI().esc(tipo)}</strong>
+        <span class="badge badge-warn">Aguardando você</span>
+      </div>
+      <p style="margin:0">${corpo}</p>
+      <div class="toolbar" style="margin-top:12px">
+        <button class="btn btn-primary btn-sm" data-act="aceitar-troca" data-id="${t.id}">Aceitar</button>
+        <button class="btn btn-danger btn-sm" data-act="recusar-troca" data-id="${t.id}">Recusar</button>
+      </div>
+    </div>`;
+  }
+
+  /* ——— Conta (perfil editável + líderes) ——— */
+  function conta(app) {
+    const { state } = app;
+    const s = window.DiaconiaAuth.sessao();
+    const d = state.diaconos.find((x) => x.id === s.diaconoId);
+    const u = state.usuarios.find((x) => x.id === s.usuarioId);
+    const casal = Engine().infoCasal(state, s.diaconoId);
+    const parceiro = casal ? UI().nomeDiacono(state, casal.parceiroId) : null;
+    const pref = casal?.casal
+      ? casal.casal.preferirMesmaFuncao
+        ? "Mesmo culto e, quando possível, mesma função"
+        : casal.casal.preferirMesmoDia
+          ? "Preferência: mesmo culto (funções podem ser diferentes)"
+          : "Sem preferência de mesmo dia"
+      : null;
+
+    const lideresLista = (state.lideres || []).filter((l) => l.ativo !== false);
+    const lideres = lideresLista
+      .map((l) => {
+        const url = UI().whatsappUrl(
+          l.whatsapp,
+          `Olá ${l.nome}, sou ${s?.nome} (diaconia) e preciso conversar sobre a escala.`
+        );
+        const semWa = !window.DiaconiaWhatsApp?.numeroValido?.(l.whatsapp);
+        return `<div class="leader-item">
+          <div><strong>${UI().esc(l.nome)}</strong>${semWa ? `<div class="muted" style="font-size:12px">WhatsApp não informado</div>` : ""}</div>
+          ${
+            semWa
+              ? `<span class="btn btn-ghost btn-sm" style="opacity:.5;pointer-events:none">WhatsApp</span>`
+              : `<a class="btn btn-accent btn-sm" href="${url}" target="_blank" rel="noopener">WhatsApp</a>`
+          }
+        </div>`;
+      })
+      .join("");
+
+    return `
+      <div class="topbar">
+        <div>
+          <h1>Minha conta</h1>
+          <p class="sub">Atualize seus dados. O que você salvar aparece também para a liderança.</p>
+        </div>
+      </div>
+      <div class="grid grid-2">
+        <div class="panel">
+          ${UI().previewDadosPessoaisHtml(d)}
+          <hr style="border:none;border-top:1px solid var(--line);margin:16px 0"/>
+          <h2 style="margin-top:0">Atualizar dados</h2>
+          ${UI().dadosPessoaisFormHtml("p", d, {
+            labelCasado: "Sou casado(a)",
+            labelFilhos: "Tenho filhos",
+            labelConjuge: "Casado(a) com",
+          })}
+          <p class="muted" style="font-size:12px;margin:-6px 0 12px">A preferência de escala em casal continua sendo definida pela liderança.</p>
+          <p class="muted" style="font-size:12px;margin:-6px 0 12px">Para um dia específico em que não pode ir, use Avisos → Não posso ir.</p>
+          ${
+            UI().nomeEquipePublico(state, d?.equipeId)
+              ? `<p style="margin:14px 0 6px"><strong>Equipe:</strong> ${UI().esc(UI().nomeEquipePublico(state, d.equipeId))}</p>`
+              : ""
+          }
+          ${
+            parceiro
+              ? `<p class="muted" style="font-size:13px">Na escala (liderança): casal com ${UI().esc(parceiro)} — ${UI().esc(pref)}</p>`
+              : ""
+          }
+          <hr style="border:none;border-top:1px solid var(--line);margin:16px 0"/>
+          <p><strong>Login:</strong> <code>${UI().esc(u?.login || "")}</code>
+            <span class="muted" style="font-size:12px"> — não altera</span></p>
+          <label class="field"><span>Nova senha</span>
+            <input type="password" id="p-senha" class="input" placeholder="Deixe em branco para manter"/>
+          </label>
+          <button class="btn btn-accent" id="btn-save-perfil">Salvar meus dados</button>
+        </div>
+        <div class="panel" id="sec-lideres">
+          <h2>Falar com um líder</h2>
+          <p class="muted" style="margin-top:0">${lideresLista.length ? `${lideresLista.length} líder(es) disponível(is).` : "Nenhum líder cadastrado no momento."} Tire dúvidas ou peça ajuda sobre a escala.</p>
+          <div class="leader-list">${lideres || `<p class="muted">Nenhum líder cadastrado.</p>`}</div>
+        </div>
+      </div>`;
+  }
+
+  function bindConta(app, root) {
+    UI().bindDadosPessoaisForm(root, "p");
+
+    root.querySelector("#btn-save-perfil")?.addEventListener("click", () => {
+      const { state } = app;
+      const sessao = window.DiaconiaAuth.sessao();
+      const d = state.diaconos.find((x) => x.id === sessao?.diaconoId);
+      const u = state.usuarios.find((x) => x.id === sessao?.usuarioId);
+      if (!d) return UI().toast("Cadastro de diácono não encontrado.");
+
+      const dados = UI().lerDadosPessoaisForm(root, "p");
+      const err = UI().validarDadosPessoaisForm(dados, { validarWhatsapp: true });
+      if (err) return UI().toast(err);
+      const senha = root.querySelector("#p-senha")?.value || "";
+
+      UI().aplicarDadosPessoais(d, dados);
+
+      if (u) {
+        u.nome = dados.nome;
+        if (senha) u.senha = senha;
+      }
+
+      if (typeof window.DiaconiaAuth.atualizarSessao === "function") {
+        window.DiaconiaAuth.atualizarSessao({ nome: dados.nome });
+      } else if (sessao) {
+        sessao.nome = dados.nome;
+      }
+
+      window.DiaconiaHistory?.add?.(state, {
+        tipo: "perfil",
+        mensagem: `${dados.nome} atualizou os dados pessoais.`,
+        usuarioId: sessao?.usuarioId,
+        meta: { diaconoId: d.id },
+      });
+
+      app.save();
+      app.render();
+      UI().toast(senha ? "Dados e senha salvos." : "Dados salvos. A liderança já vê as alterações.");
+    });
+  }
+
+  const pages = {
+    minha: { render: minhaEscala, bind: bindMinhaEscala },
+    avisos: { render: avisos, bind: bindAvisos },
+    conta: { render: conta, bind: bindConta },
+  };
+
+  return { pages };
+})();
