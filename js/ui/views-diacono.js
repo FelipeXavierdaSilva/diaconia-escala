@@ -938,7 +938,7 @@ window.DiaconiaViewsDiacono = (() => {
                 : `Pedido criado. WhatsApp enviado para ${wa.nome || "o destinatário"}.`
             );
           } else {
-            UI().toast(`Pedido criado. Mensagem copiada — use o painel para abrir o WhatsApp Web.`);
+            UI().toast(`Pedido criado. Mensagem copiada — escolha no painel: app instalado ou WhatsApp Web.`);
           }
         } else if (wa && !wa.ignorado) {
           UI().toast(`Pedido criado no portal. ${wa.erro || "WhatsApp não enviado."}`);
@@ -1077,7 +1077,9 @@ window.DiaconiaViewsDiacono = (() => {
 
       if (u) {
         u.nome = dados.nome;
-        u.whatsapp = String(dados.whatsapp || "").replace(/\D/g, "");
+        u.whatsapp = window.DiaconiaWhatsApp?.normalizarNumeroInternacional
+          ? window.DiaconiaWhatsApp.normalizarNumeroInternacional(dados.whatsapp)
+          : String(dados.whatsapp || "").replace(/\D/g, "");
         if (senha) {
           u.senha = senha;
           window.DiaconiaStorage.touchUsuario?.(u);

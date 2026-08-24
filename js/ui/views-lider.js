@@ -43,10 +43,10 @@ window.DiaconiaViewsLider = (() => {
         );
         return;
       }
-      UI().toast(`Mensagem copiada — use o botão do painel para abrir o WhatsApp.`);
+      UI().toast(`Mensagem copiada — escolha no painel: app instalado ou WhatsApp Web.`);
       return;
     }
-    UI().toast(wa.erro || "WhatsApp não enviado — cadastre o número com DDI + DDD (ex.: 5547997845287).");
+    UI().toast(wa.erro || "WhatsApp não enviado — cadastre o número com DD (ex.: 47997845287).");
   }
 
   function compartilharCredenciaisUsuarioApp(app, usuario, senha) {
@@ -79,10 +79,17 @@ window.DiaconiaViewsLider = (() => {
     return "";
   }
 
+  function waDigits(raw) {
+    if (window.DiaconiaWhatsApp?.normalizarNumeroInternacional) {
+      return window.DiaconiaWhatsApp.normalizarNumeroInternacional(raw);
+    }
+    return String(raw || "").replace(/\D/g, "");
+  }
+
   /** Usuário com papel liderança → entrada em state.lideres (visível aos diáconos). */
   function syncLiderDeUsuario(state, usuario, whatsappRaw) {
     if (!state.lideres) state.lideres = [];
-    const wa = String(whatsappRaw ?? usuario.whatsapp ?? "").replace(/\D/g, "");
+    const wa = waDigits(whatsappRaw ?? usuario.whatsapp);
     usuario.whatsapp = wa;
     if (usuario.papel !== "lider") {
       state.lideres = state.lideres.filter((l) => l.usuarioId !== usuario.id);
@@ -111,7 +118,7 @@ window.DiaconiaViewsLider = (() => {
 
   function syncDiaconoWhatsappDoUsuario(state, usuario, whatsappRaw) {
     if (!usuario?.diaconoId) return;
-    const wa = String(whatsappRaw ?? usuario.whatsapp ?? "").replace(/\D/g, "");
+    const wa = waDigits(whatsappRaw ?? usuario.whatsapp);
     usuario.whatsapp = wa;
     const d = state.diaconos.find((x) => x.id === usuario.diaconoId);
     if (d) d.whatsapp = wa;
@@ -130,7 +137,7 @@ window.DiaconiaViewsLider = (() => {
       equipeId: equipePadrao(state),
       funcaoMinisterio: "",
       funcaoDiaconatoId: "",
-      whatsapp: String(whatsapp || "").replace(/\D/g, ""),
+      whatsapp: waDigits(whatsapp),
       restricaoPessoal: "",
       casado: false,
       conjugeNome: "",
@@ -841,7 +848,7 @@ window.DiaconiaViewsLider = (() => {
         const u = (state.usuarios || []).find((x) => x.diaconoId === diacono.id);
         if (u) {
           u.nome = dados.nome;
-          u.whatsapp = String(dados.whatsapp || "").replace(/\D/g, "");
+          u.whatsapp = waDigits(dados.whatsapp);
         }
         if (oldEq !== diacono.equipeId) {
           window.DiaconiaHistory.add(state, {
@@ -1992,11 +1999,6 @@ window.DiaconiaViewsLider = (() => {
         <td>${waBadge}</td>
         <td>
           <div class="toolbar">
-            ${
-              u.senha && window.DiaconiaWhatsApp?.numeroValido?.(wa)
-                ? `<button type="button" class="btn btn-accent btn-sm" data-act="share-wa-row" data-id="${u.id}" title="Enviar login e senha no WhatsApp">WhatsApp</button>`
-                : ""
-            }
             ${UI().btnIcon({ icon: "pencil", label: "Editar", variant: "ghost", attrs: { "data-act": "edit-u", "data-id": u.id } })}
             ${UI().btnIcon({
               icon: "trash",
@@ -2031,13 +2033,6 @@ window.DiaconiaViewsLider = (() => {
       btn.addEventListener("click", () => {
         const u = state.usuarios.find((x) => x.id === btn.dataset.id);
         formUsuario(app, u);
-      });
-    });
-    root.querySelectorAll('[data-act="share-wa-row"]').forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const u = state.usuarios.find((x) => x.id === btn.dataset.id);
-        if (!u) return;
-        compartilharCredenciaisUsuarioApp(app, u);
       });
     });
     root.querySelectorAll('[data-act="del-u"]').forEach((btn) => {
@@ -2100,8 +2095,8 @@ window.DiaconiaViewsLider = (() => {
       <h2>${usuario ? "Editar usuário" : "Adicionar usuário"}</h2>
       <label class="field"><span>Nome</span><input id="u-nome" value="${UI().esc(usuario?.nome || "")}"/></label>
       <label class="field"><span>Login</span><input id="u-login" value="${UI().esc(usuario?.login || "")}" autocomplete="off"/></label>
-      <label class="field"><span>WhatsApp (com DDI)</span>
-        <input id="u-whatsapp" inputmode="tel" value="${UI().esc(waInicial)}" placeholder="Ex.: 5511999990000"/>
+      <label class="field"><span>WhatsApp (DD)</span>
+        <input id="u-whatsapp" inputmode="tel" value="${UI().esc(waInicial)}" placeholder="Ex.: 47999990000"/>
       </label>
       <p class="muted" style="font-size:12px;margin:-6px 0 12px" id="u-wa-hint">${usuario ? "Usado para contato e compartilhar login/senha." : "Ao criar, abriremos o WhatsApp com login e senha (se o número estiver preenchido)."}</p>
       <label class="field"><span>Senha</span>
@@ -2169,10 +2164,10 @@ window.DiaconiaViewsLider = (() => {
         const senhaCampo = m.querySelector("#u-senha").value;
         const senhaShare = senhaCampo || usuario.senha;
         const papelShare = m.querySelector("#u-papel").value;
-        const whatsappShare = String(m.querySelector("#u-whatsapp")?.value || "").replace(/\D/g, "");
+        const whatsappShare = waDigits(m.querySelector("#u-whatsapp")?.value);
         if (!senhaShare) return UI().toast("Não há senha para compartilhar.");
         if (whatsappShare && !window.DiaconiaWhatsApp?.numeroValido?.(whatsappShare)) {
-          return UI().toast("WhatsApp inválido. Use DDI + DDD + número (ex.: 5511999990000).");
+          return UI().toast("WhatsApp inválido. Use DD + número (ex.: 47997845287).");
         }
         const snapshot = {
           ...usuario,
@@ -2193,10 +2188,10 @@ window.DiaconiaViewsLider = (() => {
       let login = m.querySelector("#u-login").value.trim().toLowerCase().replace(/\s+/g, "");
       const senha = m.querySelector("#u-senha").value;
       const papel = m.querySelector("#u-papel").value;
-      const whatsapp = String(m.querySelector("#u-whatsapp")?.value || "").replace(/\D/g, "");
+      const whatsapp = waDigits(m.querySelector("#u-whatsapp")?.value);
       const logId = ctx(app).sessao()?.usuarioId;
       if (whatsapp && !window.DiaconiaWhatsApp?.numeroValido?.(whatsapp)) {
-        return UI().toast("WhatsApp inválido. Use DDI + DDD + número (ex.: 5511999990000).");
+        return UI().toast("WhatsApp inválido. Use DD + número (ex.: 47997845287).");
       }
       if (!nome) return UI().toast("Informe o nome.");
       if (!login) login = loginUnico(state, nome, usuario?.id);
@@ -2403,8 +2398,8 @@ window.DiaconiaViewsLider = (() => {
             <button type="button" class="btn btn-danger btn-sm btn-icon" data-act="del-lider" data-id="${l.id}" title="Excluir" aria-label="Excluir">${UI().icon("trash")}</button>
           </div>
           <label class="field"><span>Nome</span><input data-l="nome" data-id="${l.id}" value="${UI().esc(l.nome || "")}"/></label>
-          <label class="field"><span>WhatsApp (com DDI, ex.: 5511999990000)</span>
-            <input data-l="whatsapp" data-id="${l.id}" value="${UI().esc(l.whatsapp || "")}"/>
+          <label class="field"><span>WhatsApp (DD)</span>
+            <input data-l="whatsapp" data-id="${l.id}" value="${UI().esc(l.whatsapp || "")}" placeholder="Ex.: 47999990000"/>
           </label>
           <label class="field"><span><input type="checkbox" data-l="ativo" data-id="${l.id}" ${l.ativo !== false ? "checked" : ""}/> Ativo (aparece para o diácono)</span></label>
         </div>`
@@ -2455,7 +2450,7 @@ window.DiaconiaViewsLider = (() => {
       <div class="panel" style="margin-top:16px">
         <h2>WhatsApp (avisos e trocas)</h2>
         <p class="muted" style="margin-top:-4px">
-          Hoje: modo <strong>manual</strong> (painel + WhatsApp Web — recomendado no PC).
+          Hoje: modo <strong>manual</strong> (no PC pergunta se usa o <strong>app instalado</strong> ou o <strong>WhatsApp Web</strong>).
           Futuro: modo <strong>API</strong> envia pelo servidor sem intervenção.
         </p>
         <p class="muted" style="font-size:13px">
@@ -2471,8 +2466,8 @@ window.DiaconiaViewsLider = (() => {
             <label class="field"><span><input type="checkbox" id="wa-cadastro" ${wa.notificarCadastroUsuario !== false ? "checked" : ""}/> Enviar login e senha ao criar usuário</span></label>
             <label class="field"><span><input type="checkbox" id="wa-rest" ${wa.notificarRestricao !== false ? "checked" : ""}/> Avisar líderes quando diácono enviar “Não posso ir”</span></label>
             <label class="field"><span><input type="checkbox" id="wa-rest-st" ${wa.notificarStatusRestricao !== false ? "checked" : ""}/> Avisar diácono quando líder aprovar ou recusar aviso</span></label>
-            <label class="field"><span><input type="checkbox" id="wa-direto" ${wa.abrirDireto !== false ? "checked" : ""}/> Abrir conversa direto no WhatsApp (recomendado)</span></label>
-            <p class="muted" style="font-size:12px;margin:-8px 0 12px">Desmarcado = mostra painel para copiar a mensagem antes de abrir.</p>
+            <label class="field"><span><input type="checkbox" id="wa-direto" ${wa.abrirDireto ? "checked" : ""}/> No celular, abrir conversa direto no app</span></label>
+            <p class="muted" style="font-size:12px;margin:-8px 0 12px">No computador o sistema sempre pergunta: app instalado (desta máquina) ou WhatsApp Web.</p>
             <label class="field"><span>Modo de envio</span>
               <select id="wa-modo" class="select">
                 <option value="manual" ${wa.modo !== "api" ? "selected" : ""}>Manual (wa.me) — atual</option>
@@ -2606,7 +2601,7 @@ window.DiaconiaViewsLider = (() => {
         notificarRestricao: root.querySelector("#wa-rest")?.checked !== false,
         notificarStatusRestricao: root.querySelector("#wa-rest-st")?.checked !== false,
         abrirDireto: root.querySelector("#wa-direto")?.checked !== false,
-        abrirNoNavegador: true,
+        abrirNoNavegador: false,
         modo: root.querySelector("#wa-modo")?.value === "api" ? "api" : "manual",
         portalBaseUrl: root.querySelector("#wa-portal")?.value.trim() || "",
         apiUrl: root.querySelector("#wa-api-url")?.value.trim() || "",
@@ -2676,7 +2671,7 @@ window.DiaconiaViewsLider = (() => {
         const u = state.usuarios.find((x) => x.id === l.usuarioId);
         if (!u) continue;
         u.nome = l.nome;
-        u.whatsapp = String(l.whatsapp || "").replace(/\D/g, "");
+        u.whatsapp = waDigits(l.whatsapp);
       }
       window.DiaconiaHistory.add(state, {
         tipo: "lider",

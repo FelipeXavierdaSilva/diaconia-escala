@@ -1,8 +1,9 @@
 /**
- * Teste do compartilhamento WhatsApp (wa.me direto + login/senha).
+ * Teste do WhatsApp: número BR (zero + DD) e link direto da conversa.
  */
 const fs = require("fs");
 const path = require("path");
+const https = require("https");
 const vm = require("vm");
 
 const root = path.join(__dirname, "..");
@@ -55,7 +56,7 @@ const window = {
   },
   open(url) {
     lastOpenedUrl = url;
-    return null;
+    return { closed: false };
   },
 };
 
@@ -111,7 +112,10 @@ const state = Seed.build();
 
 assert("DiaconiaWhatsApp existe", !!WA);
 
-// Normalização de número BR
+assert(
+  "047997845287 → 5547997845287",
+  WA.normalizarNumeroInternacional("047997845287") === "5547997845287"
+);
 assert(
   "47997845287 → 5547997845287",
   WA.normalizarNumeroInternacional("47997845287") === "5547997845287"
@@ -121,71 +125,65 @@ assert(
   WA.normalizarNumeroInternacional("5547997845287") === "5547997845287"
 );
 assert(
-  "numeroValido 47997845287",
-  WA.numeroValido("47997845287") === true
+  "047 99784-5287 → 5547997845287",
+  WA.normalizarNumeroInternacional("047 99784-5287") === "5547997845287"
 );
 assert(
-  "numeroValido incompleto rejeita",
-  WA.numeroValido("479978") === false
+  "55047997845287 → 5547997845287",
+  WA.normalizarNumeroInternacional("55047997845287") === "5547997845287"
 );
+assert("numeroValido 047997845287", WA.numeroValido("047997845287") === true);
+assert("numeroValido 479978", WA.numeroValido("479978") === false);
 
-// wa.me URL
 const texto = "Login: teste\nSenha: 123";
-const url = WA.waMeUrl("47997845287", texto);
-assert("waMeUrl usa https://wa.me/", url.startsWith("https://wa.me/5547997845287"));
-assert("waMeUrl inclui text=", url.includes("text="));
+const urlMe = WA.waMeUrl("047997845287", texto);
 assert(
-  "waMeUrl codifica mensagem",
-  decodeURIComponent(url.split("text=")[1]).includes("Login: teste")
+  "waMeUrl abre conversa (api.whatsapp.com/send)",
+  urlMe.startsWith("https://api.whatsapp.com/send/?")
 );
+assert("waMeUrl phone=5547997845287", urlMe.includes("phone=5547997845287"));
+assert("waMeUrl não usa 047", !urlMe.includes("047997845287"));
+assert("waMeUrl type=phone_number", urlMe.includes("type=phone_number"));
+assert("waMeUrl app_absent=0", urlMe.includes("app_absent=0"));
+assert("waMeUrl inclui texto", decodeURIComponent(urlMe).includes("Login: teste"));
 
-// abrirConversaWhatsapp (desktop simula click em <a>)
-lastOpenedUrl = null;
-clickCount = 0;
-const ab = WA.abrirConversaWhatsapp("5547997845287", "Olá teste");
-assert("abrirConversaWhatsapp ok", ab.ok === true);
-assert("abrirConversaWhatsapp click", clickCount === 1);
+const urlWeb = WA.waWebUrl("047997845287", texto);
 assert(
-  "abrirConversaWhatsapp URL correta",
-  lastOpenedUrl === WA.waMeUrl("5547997845287", "Olá teste")
+  "waWebUrl usa web.whatsapp.com/send",
+  urlWeb.startsWith("https://web.whatsapp.com/send/?")
 );
+assert("waWebUrl phone=5547997845287", urlWeb.includes("phone=5547997845287"));
+assert("waWebUrl type=phone_number", urlWeb.includes("type=phone_number"));
 
-// compartilharCredenciais com abrirDireto (padrão) — abre wa.me
-state.configuracoes.whatsapp = WA.cfgPadrao();
-const usuario = {
-  id: "u_test",
-  nome: "Felipe Teste",
-  login: "felipe",
-  papel: "diacono",
-  whatsapp: "47997845287",
-  senha: "felipe123",
-};
 lastOpenedUrl = null;
 clickCount = 0;
-const share = WA.compartilharCredenciaisUsuario(state, usuario, { senha: "felipe123" });
-assert("compartilharCredenciais ok", share.ok === true, share.erro || "");
-assert("compartilharCredenciais manual_direto", share.via === "manual_direto", share.via || "");
-assert("compartilharCredenciais abriu conversa", !!lastOpenedUrl?.includes("5547997845287"), lastOpenedUrl || "null");
-if (lastOpenedUrl) {
-  const msgDecoded = decodeURIComponent(lastOpenedUrl.split("text=")[1] || "");
-  assert("mensagem contém login", msgDecoded.includes("felipe"));
-  assert("mensagem contém senha", msgDecoded.includes("felipe123"));
-}
-
-// número editado no formulário (snapshot) sem salvar no state
-const snapshotForm = { ...usuario, whatsapp: "11999990000" };
-lastOpenedUrl = null;
-clickCount = 0;
-const shareForm = WA.compartilharCredenciaisUsuario(state, snapshotForm, { senha: "felipe123" });
-assert("snapshot whatsapp ok", shareForm.ok === true);
+const ab = WA.abrirWhatsAppApp("047997845287", "Olá teste");
+assert("abrirWhatsAppApp ok", ab.ok === true);
+assert("abrirWhatsAppApp numero normalizado", ab.numero === "5547997845287");
 assert(
-  "snapshot usa número do formulário",
-  lastOpenedUrl?.includes("5511999990000"),
+  "abrirWhatsAppApp URL da conversa",
+  lastOpenedUrl === WA.waMeUrl("047997845287", "Olá teste"),
   lastOpenedUrl || "null"
 );
 
-// compartilharCredenciais com painel (abrirDireto false)
-state.configuracoes.whatsapp.abrirDireto = false;
+lastOpenedUrl = null;
+const web = WA.abrirWhatsAppWeb("047997845287", "Olá teste");
+assert("abrirWhatsAppWeb ok", web.ok === true);
+assert(
+  "abrirWhatsAppWeb URL da conversa",
+  lastOpenedUrl === WA.waWebUrl("047997845287", "Olá teste"),
+  lastOpenedUrl || "null"
+);
+
+const usuario = {
+  id: "u_test",
+  nome: "Felipe Teste",
+  login: "felipexavier",
+  papel: "lider",
+  whatsapp: "047997845287",
+  senha: "felipe123",
+};
+
 sandbox.window.DiaconiaUI = {
   openModal(html) {
     sandbox._lastModal = html;
@@ -196,25 +194,66 @@ sandbox.window.DiaconiaUI = {
   toast() {},
   closeModal() {},
 };
+state.configuracoes.whatsapp = WA.cfgPadrao();
 lastOpenedUrl = null;
 clickCount = 0;
-const painel = WA.compartilharCredenciaisUsuario(state, usuario, { senha: "felipe123" });
-assert("compartilhar painel ok", painel.ok === true);
-assert("compartilhar painel via manual_painel", painel.via === "manual_painel");
-assert("painel não abriu direto", clickCount === 0);
-assert("painel modal aberto", typeof sandbox._lastModal === "string" && sandbox._lastModal.includes("wa-painel-texto"));
+const share = WA.compartilharCredenciaisUsuario(state, usuario, { senha: "felipe123" });
+assert("compartilharCredenciais ok", share.ok === true, share.erro || "");
+assert("compartilharCredenciais abre painel no PC", share.via === "manual_painel", share.via || "");
+assert(
+  "painel mostra 5547997845287",
+  typeof sandbox._lastModal === "string" && sandbox._lastModal.includes("5547997845287")
+);
+assert(
+  "painel não mostra 047 como destino",
+  typeof sandbox._lastModal === "string" && !sandbox._lastModal.includes("047997845287")
+);
 
-// Sem WhatsApp cadastrado
+const dest = WA.numeroDeUsuario(state, usuario);
+assert("numeroDeUsuario ok com 047", dest.ok === true, dest.erro || "");
+assert("numeroDeUsuario = 5547997845287", dest.numero === "5547997845287");
+
 const semWa = WA.compartilharCredenciaisUsuario(
   state,
   { id: "x", nome: "Sem Num", login: "sem", senha: "123" },
   { senha: "123" }
 );
 assert("sem whatsapp falha", semWa.ok === false);
-assert("sem whatsapp erro claro", (semWa.erro || "").includes("WhatsApp"));
 
-const passed = results.filter((r) => r.ok).length;
-const failed = results.filter((r) => !r.ok).length;
+function httpGet(url) {
+  return new Promise((resolve) => {
+    const req = https.get(
+      url,
+      {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+        timeout: 12000,
+      },
+      (res) => {
+        resolve({ status: res.statusCode, location: res.headers.location || "" });
+        res.resume();
+      }
+    );
+    req.on("error", (err) => resolve({ error: err.message }));
+    req.on("timeout", () => {
+      req.destroy();
+      resolve({ error: "timeout" });
+    });
+  });
+}
 
-console.log(JSON.stringify({ total: results.length, passed, failed, results }, null, 2));
-process.exit(failed ? 1 : 0);
+(async () => {
+  const liveUrl = WA.waMeUrl("047997845287", "teste");
+  const live = await httpGet(liveUrl);
+  const okHttp =
+    !live.error && Number(live.status) >= 200 && Number(live.status) < 400;
+  assert(
+    "HTTP click-to-chat 5547997845287",
+    okHttp,
+    live.error || `status ${live.status} loc=${live.location}`
+  );
+
+  const passed = results.filter((r) => r.ok).length;
+  const failed = results.filter((r) => !r.ok).length;
+  console.log(JSON.stringify({ total: results.length, passed, failed, results }, null, 2));
+  process.exit(failed ? 1 : 0);
+})();

@@ -152,9 +152,14 @@ window.DiaconiaStorage = (() => {
       if (esc.gerada === undefined) esc.gerada = false;
     }
 
-    // Usuários: WhatsApp no cadastro
+    // Usuários: WhatsApp no cadastro (normaliza 0 + DD)
+    const normWa = (v) =>
+      typeof window.DiaconiaWhatsApp?.normalizarNumeroInternacional === "function"
+        ? window.DiaconiaWhatsApp.normalizarNumeroInternacional(v)
+        : String(v || "").replace(/\D/g, "");
     for (const u of state.usuarios || []) {
       if (u.whatsapp === undefined) u.whatsapp = "";
+      else if (u.whatsapp) u.whatsapp = normWa(u.whatsapp);
     }
 
     // Diácono sem perfil vinculado → cria cadastro mínimo automaticamente
@@ -167,7 +172,7 @@ window.DiaconiaStorage = (() => {
           : `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       for (const u of state.usuarios || []) {
         if (u.papel !== "diacono" || u.diaconoId) continue;
-        const wa = String(u.whatsapp || "").replace(/\D/g, "");
+        const wa = normWa(u.whatsapp);
         const id = uid("d");
         state.diaconos.push({
           id,
@@ -196,10 +201,11 @@ window.DiaconiaStorage = (() => {
     // Líderes: vínculo com conta de usuário + sincronizar liderança
     for (const l of state.lideres || []) {
       if (l.usuarioId === undefined) l.usuarioId = null;
+      if (l.whatsapp) l.whatsapp = normWa(l.whatsapp);
     }
     for (const u of state.usuarios || []) {
       if (u.papel !== "lider") continue;
-      const wa = String(u.whatsapp || "").replace(/\D/g, "");
+      const wa = normWa(u.whatsapp);
       let l = (state.lideres || []).find((x) => x.usuarioId === u.id);
       if (!l) {
         l = (state.lideres || []).find((x) => !x.usuarioId && x.nome === u.nome);
@@ -225,6 +231,7 @@ window.DiaconiaStorage = (() => {
       if (d.funcaoMinisterio === undefined) d.funcaoMinisterio = "";
       if (d.funcaoDiaconatoId === undefined) d.funcaoDiaconatoId = "";
       if (d.whatsapp === undefined) d.whatsapp = "";
+      else if (d.whatsapp) d.whatsapp = normWa(d.whatsapp);
       if (d.restricaoPessoal === undefined) d.restricaoPessoal = "";
       if (d.casado === undefined) d.casado = false;
       if (d.conjugeNome === undefined) d.conjugeNome = "";
@@ -267,7 +274,8 @@ window.DiaconiaStorage = (() => {
       state.configuracoes.whatsapp = {
         ativo: true,
         modo: "manual",
-        abrirNoNavegador: true,
+        abrirDireto: false,
+        abrirNoNavegador: false,
         notificarPedidoTroca: true,
         notificarRespostaTroca: true,
         notificarCadastroUsuario: true,

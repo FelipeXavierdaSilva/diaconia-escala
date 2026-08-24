@@ -1390,6 +1390,18 @@ table.data tbody tr.no-click {
   transform: translateY(-1px);
 }
 
+.btn-choice.is-last {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--teal) 28%, transparent);
+  background: color-mix(in srgb, var(--teal) 7%, #fff);
+}
+
+.choice-last {
+  font-style: normal;
+  font-weight: 700;
+  color: var(--teal);
+}
+
 .adv-details {
   margin: 12px 0 16px;
   border: 1px solid var(--line);

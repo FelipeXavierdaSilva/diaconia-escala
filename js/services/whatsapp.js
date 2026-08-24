@@ -11,14 +11,16 @@ window.DiaconiaWhatsApp = (() => {
   const Hist = () => window.DiaconiaHistory;
 
   const MODOS = { manual: "manual", api: "api" };
+  const DESTINOS = { app: "app", web: "web" };
+  const DESTINO_KEY = "diaconia_wa_destino";
 
   function cfgPadrao() {
     return {
       ativo: true,
       modo: MODOS.manual,
-      /** true = abre wa.me direto na conversa; false = painel com copiar + link */
-      abrirDireto: true,
-      abrirNoNavegador: true,
+      /** No celular: true abre direto. No PC o painel sempre pergunta o tipo (app vs Web). */
+      abrirDireto: false,
+      abrirNoNavegador: false,
       notificarPedidoTroca: true,
       notificarRespostaTroca: true,
       notificarCadastroUsuario: true,
@@ -55,13 +57,29 @@ window.DiaconiaWhatsApp = (() => {
     return String(numero || "").replace(/\D/g, "");
   }
 
-  /** Adiciona DDI 55 quando o número parece ser BR (DDD + celular/fixo). */
+  /**
+   * Número internacional para o WhatsApp (BR).
+   * Aceita 047997845287, 47997845287 ou 5547997845287 → 5547997845287.
+   * Remove o zero de tronco e inclui 55 quando faltar.
+   */
   function normalizarNumeroInternacional(numero) {
     let n = normalizarNumero(numero);
     if (!n) return n;
-    if ((n.length === 10 || n.length === 11) && /^[1-9]{2}/.test(n)) {
+
+    if (n.startsWith("550") && n.length >= 13 && n.length <= 14) {
+      n = `55${n.slice(3)}`;
+    }
+
+    if (n.startsWith("55") && (n.length === 12 || n.length === 13)) {
+      return n;
+    }
+
+    n = n.replace(/^0+/, "");
+
+    if ((n.length === 10 || n.length === 11) && /^[1-9]\d/.test(n)) {
       n = `55${n}`;
     }
+
     return n;
   }
 
@@ -102,7 +120,7 @@ window.DiaconiaWhatsApp = (() => {
     if (!numeroValido(numero)) {
       return {
         ok: false,
-        erro: `${d.nome} ainda não tem WhatsApp válido cadastrado (use DDI + DDD, ex.: 5547997845287).`,
+        erro: `${d.nome} ainda não tem WhatsApp válido cadastrado (use DD + número, ex.: 47997845287).`,
         numero: "",
         nome: d.nome,
         diacono: d,
@@ -128,7 +146,7 @@ window.DiaconiaWhatsApp = (() => {
     if (!numeroValido(numero)) {
       return {
         ok: false,
-        erro: `${usuario.nome} ainda não tem WhatsApp válido. Cadastre com DDI + DDD (ex.: 5547997845287).`,
+        erro: `${usuario.nome} ainda não tem WhatsApp válido. Cadastre com DD + número (ex.: 47997845287).`,
         numero: "",
         nome: usuario.nome,
       };
@@ -147,7 +165,7 @@ window.DiaconiaWhatsApp = (() => {
     if (!numeroValido(numero)) {
       return {
         ok: false,
-        erro: `${lider.nome} ainda não tem WhatsApp cadastrado (ex.: 5547997845287).`,
+        erro: `${lider.nome} ainda não tem WhatsApp cadastrado (ex.: 47997845287).`,
         numero: "",
         nome: lider.nome,
       };
@@ -164,41 +182,104 @@ window.DiaconiaWhatsApp = (() => {
     return `${root}${query.startsWith("?") ? query : `?${query}`}`;
   }
 
+  function isMobile() {
+    return (
+      typeof navigator !== "undefined" &&
+      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "")
+    );
+  }
+
+  function lerDestinoPreferido() {
+    try {
+      const v = localStorage.getItem(DESTINO_KEY);
+      if (v === DESTINOS.web || v === DESTINOS.app) return v;
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
+
+  function salvarDestinoPreferido(destino) {
+    if (destino !== DESTINOS.web && destino !== DESTINOS.app) return;
+    try {
+      localStorage.setItem(DESTINO_KEY, destino);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function clickToChatQuery(numero, texto) {
+    const n = normalizarNumeroInternacional(numero);
+    const parts = [`phone=${n}`];
+    if (texto) parts.push(`text=${encodeURIComponent(texto)}`);
+    parts.push("type=phone_number");
+    parts.push("app_absent=0");
+    return parts.join("&");
+  }
+
+  /** WhatsApp Web — abre a conversa daquele número, não a tela inicial. */
   function waWebUrl(numero, texto) {
-    const n = normalizarNumeroInternacional(numero);
-    return `https://web.whatsapp.com/send?phone=${n}&text=${encodeURIComponent(texto || "")}`;
+    return `https://web.whatsapp.com/send/?${clickToChatQuery(numero, texto)}`;
   }
 
-  /** Link oficial — abre app no celular ou WhatsApp Desktop no PC */
+  /** Click-to-chat oficial — abre a conversa no app instalado (PC) ou no celular. */
   function waMeUrl(numero, texto) {
-    const n = normalizarNumeroInternacional(numero);
-    return `https://wa.me/${n}?text=${encodeURIComponent(texto || "")}`;
+    return `https://api.whatsapp.com/send/?${clickToChatQuery(numero, texto)}`;
   }
 
-  /** Abre a conversa diretamente (sem painel intermediário) */
-  function abrirConversaWhatsapp(numero, texto) {
+  function waAppUrl(numero, texto) {
+    return waMeUrl(numero, texto);
+  }
+
+  function abrirUrl(url, { sameTab = false } = {}) {
+    if (sameTab || isMobile()) {
+      window.location.href = url;
+      return;
+    }
+    let opened = null;
+    try {
+      opened = window.open(url, "_blank", "noopener,noreferrer");
+    } catch {
+      opened = null;
+    }
+    if (opened) return;
+    const a = document.createElement("a");
+    a.href = url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  function abrirWhatsAppWeb(numero, texto) {
+    const n = normalizarNumeroInternacional(numero);
+    if (!numeroValido(n)) {
+      return { ok: false, erro: "Número de WhatsApp inválido." };
+    }
+    const url = waWebUrl(n, texto);
+    abrirUrl(url);
+    return { ok: true, url, via: DESTINOS.web, numero: n };
+  }
+
+  /** Abre a conversa da pessoa no app desta máquina (ou no celular). */
+  function abrirWhatsAppApp(numero, texto) {
     const n = normalizarNumeroInternacional(numero);
     if (!numeroValido(n)) {
       return { ok: false, erro: "Número de WhatsApp inválido." };
     }
     const url = waMeUrl(n, texto);
-    const mobile =
-      typeof navigator !== "undefined" &&
-      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
-
-    if (mobile) {
+    if (isMobile()) {
       window.location.href = url;
-    } else {
-      const a = document.createElement("a");
-      a.href = url;
-      a.target = "_blank";
-      a.rel = "noopener noreferrer";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      return { ok: true, url, via: DESTINOS.app, numero: n };
     }
+    abrirUrl(url);
+    return { ok: true, url, via: DESTINOS.app, numero: n };
+  }
 
-    return { ok: true, url, via: "wa.me" };
+  /** Abre a conversa no app (wa.me) — usado também pelos testes */
+  function abrirConversaWhatsapp(numero, texto) {
+    return abrirWhatsAppApp(numero, texto);
   }
 
   function whatsappDeDiacono(state, diaconoId) {
@@ -214,48 +295,65 @@ window.DiaconiaWhatsApp = (() => {
     }
   }
 
-  function painelEnvioManual({ nome, numero, texto, webUrl }) {
+  function painelEnvioManual({ nome, numero, texto }) {
     const UI = window.DiaconiaUI;
     const numFmt = normalizarNumeroInternacional(numero);
-    const url = webUrl || waWebUrl(numFmt, texto);
     const titulo = nome ? `WhatsApp — ${nome}` : "Enviar pelo WhatsApp";
+    const preferido = lerDestinoPreferido();
 
     if (!UI?.openModal) {
-      window.open(url, "_blank", "noopener,noreferrer");
+      if (preferido === DESTINOS.web) abrirWhatsAppWeb(numFmt, texto);
+      else abrirWhatsAppApp(numFmt, texto);
       return;
     }
+
+    const clsApp = preferido === DESTINOS.app ? " is-last" : "";
+    const clsWeb = preferido === DESTINOS.web ? " is-last" : "";
+    const tagApp = preferido === DESTINOS.app ? ` · <em class="choice-last">usado da última vez</em>` : "";
+    const tagWeb = preferido === DESTINOS.web ? ` · <em class="choice-last">usado da última vez</em>` : "";
 
     UI.openModal(`
       <h2>${UI.esc(titulo)}</h2>
       <p class="muted" style="margin-top:0;font-size:13px">
-        A mensagem foi <strong>copiada</strong>. Clique abaixo para abrir a conversa no WhatsApp.
+        A mensagem já foi <strong>copiada</strong>. Qual WhatsApp você quer usar nesta máquina?
       </p>
       <p class="muted" style="font-size:12px;margin:-4px 0 12px">Número: <strong>${UI.esc(numFmt)}</strong></p>
+      <div class="choice-stack" id="wa-destino-stack">
+        <button type="button" class="btn btn-choice${clsApp}" data-act="wa-app">
+          <strong>App instalado</strong>
+          <span>WhatsApp Desktop / Windows — usa a sessão desta máquina${tagApp}</span>
+        </button>
+        <button type="button" class="btn btn-choice${clsWeb}" data-act="wa-web">
+          <strong>WhatsApp Web</strong>
+          <span>Abre no navegador (Chrome/Edge)${tagWeb}</span>
+        </button>
+      </div>
       <label class="field"><span>Mensagem</span>
-        <textarea id="wa-painel-texto" class="textarea" rows="10" readonly>${UI.esc(texto)}</textarea>
+        <textarea id="wa-painel-texto" class="textarea" rows="8" readonly>${UI.esc(texto)}</textarea>
       </label>
       <div class="modal-actions" style="flex-wrap:wrap">
-        <button type="button" class="btn btn-accent" data-act="wa-web">Abrir conversa no WhatsApp</button>
-        <button type="button" class="btn btn-ghost" data-act="wa-web-alt">WhatsApp Web (alternativo)</button>
         <button type="button" class="btn btn-ghost" data-act="wa-copy">Copiar mensagem</button>
         <button type="button" class="btn btn-ghost" data-act="cancel">Fechar</button>
       </div>
     `);
 
     const m = document.getElementById("modal-root");
+    const textoAtual = () => m.querySelector("#wa-painel-texto")?.value || texto;
     m?.addEventListener("click", async (e) => {
       const act = e.target.closest("[data-act]")?.dataset.act;
       if (act === "cancel") return UI.closeModal();
-      if (act === "wa-web") {
-        abrirConversaWhatsapp(numFmt, m.querySelector("#wa-painel-texto")?.value || texto);
+      if (act === "wa-app") {
+        salvarDestinoPreferido(DESTINOS.app);
+        abrirWhatsAppApp(numFmt, textoAtual());
         return;
       }
-      if (act === "wa-web-alt") {
-        window.open(waWebUrl(numFmt, m.querySelector("#wa-painel-texto")?.value || texto), "_blank", "noopener,noreferrer");
+      if (act === "wa-web") {
+        salvarDestinoPreferido(DESTINOS.web);
+        abrirWhatsAppWeb(numFmt, textoAtual());
         return;
       }
       if (act === "wa-copy") {
-        const ok = await copiarTexto(m.querySelector("#wa-painel-texto")?.value || texto);
+        const ok = await copiarTexto(textoAtual());
         UI.toast(ok ? "Mensagem copiada." : "Não foi possível copiar.");
       }
     });
@@ -462,17 +560,17 @@ window.DiaconiaWhatsApp = (() => {
     const num = normalizarNumeroInternacional(payload.numero);
     const texto = payload.texto || "";
     const c = cfg(state || window.DiaconiaApp?.state);
-    const usarPainel = payload.usarPainelManual === true || c.abrirDireto === false;
+    const noCelularDireto = isMobile() && c.abrirDireto !== false && payload.usarPainelManual !== true;
+    const usarPainel = !noCelularDireto;
 
     copiarTexto(texto).catch(() => {});
 
     if (usarPainel) {
-      const url = waMeUrl(num, texto);
-      painelEnvioManual({ nome: payload.nome, numero: num, texto, webUrl: url });
-      return { ok: true, via: "manual_painel", url, copiado: true, nome: payload.nome };
+      painelEnvioManual({ nome: payload.nome, numero: num, texto });
+      return { ok: true, via: "manual_painel", url: waMeUrl(num, texto), copiado: true, nome: payload.nome };
     }
 
-    const aberto = abrirConversaWhatsapp(num, texto);
+    const aberto = abrirWhatsAppApp(num, texto);
     if (!aberto.ok) return aberto;
     return { ok: true, via: "manual_direto", url: aberto.url, copiado: true, nome: payload.nome };
   }
@@ -735,7 +833,10 @@ window.DiaconiaWhatsApp = (() => {
     portalUrl,
     waMeUrl,
     waWebUrl,
+    waAppUrl,
     abrirConversaWhatsapp,
+    abrirWhatsAppApp,
+    abrirWhatsAppWeb,
     painelEnvioManual,
     montarMensagem,
     motivoAvisoTexto,

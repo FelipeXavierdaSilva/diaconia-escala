@@ -355,7 +355,8 @@ window.DiaconiaSeed = (() => {
         whatsapp: {
           ativo: true,
           modo: "manual",
-          abrirNoNavegador: true,
+          abrirDireto: false,
+          abrirNoNavegador: false,
           notificarPedidoTroca: true,
           notificarRespostaTroca: true,
           notificarCadastroUsuario: true,

@@ -446,8 +446,8 @@ window.DiaconiaUI = (() => {
       <label class="field"><span>Nome</span>
         <input id="${prefix}-nome" class="input" value="${esc(d.nome || "")}"/>
       </label>
-      <label class="field"><span>WhatsApp (com DDI)</span>
-        <input id="${prefix}-whatsapp" class="input" inputmode="tel" value="${esc(d.whatsapp || "")}" placeholder="Ex.: 5511999990000"/>
+      <label class="field"><span>WhatsApp (DD)</span>
+        <input id="${prefix}-whatsapp" class="input" inputmode="tel" value="${esc(d.whatsapp || "")}" placeholder="Ex.: 47999990000"/>
       </label>
       ${
         showWhatsappHint
@@ -493,7 +493,9 @@ window.DiaconiaUI = (() => {
     const filhosData = lerFilhosForm(root, prefix);
     return {
       nome: root.querySelector(`#${prefix}-nome`)?.value.trim() || "",
-      whatsapp: String(root.querySelector(`#${prefix}-whatsapp`)?.value || "").replace(/\D/g, ""),
+      whatsapp: window.DiaconiaWhatsApp?.normalizarNumeroInternacional
+        ? window.DiaconiaWhatsApp.normalizarNumeroInternacional(root.querySelector(`#${prefix}-whatsapp`)?.value)
+        : String(root.querySelector(`#${prefix}-whatsapp`)?.value || "").replace(/\D/g, ""),
       funcaoMinisterio: root.querySelector(`#${prefix}-ministerio`)?.value.trim() || "",
       casado,
       conjugeNome: casado ? root.querySelector(`#${prefix}-conjuge`)?.value.trim() || "" : "",
@@ -507,7 +509,7 @@ window.DiaconiaUI = (() => {
     const { exigirNome = true, validarWhatsapp = false } = opts;
     if (exigirNome && !data.nome) return "Informe o nome.";
     if (validarWhatsapp && data.whatsapp && !window.DiaconiaWhatsApp?.numeroValido?.(data.whatsapp)) {
-      return "WhatsApp inválido. Use DDI + DDD + número (ex.: 5511999990000).";
+      return "WhatsApp inválido. Use DD + número (ex.: 47997845287).";
     }
     if (data.casado && !data.conjugeNome) return "Informe com quem é casado(a).";
     return validarFilhosForm(data);
