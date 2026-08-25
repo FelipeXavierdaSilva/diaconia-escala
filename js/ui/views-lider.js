@@ -2286,6 +2286,8 @@ window.DiaconiaViewsLider = (() => {
         window.DiaconiaStorage.touchUsuario?.(usuario);
         if (papel === "lider") {
           syncLiderDeUsuario(state, usuario, whatsapp);
+          const liderRow = (state.lideres || []).find((x) => x.usuarioId === usuario.id);
+          if (liderRow && entrarNaEscala) liderRow.apareceEmDiaconos = true;
         } else {
           removerLiderDeUsuario(state, usuario.id);
         }
@@ -2315,6 +2317,8 @@ window.DiaconiaViewsLider = (() => {
         };
         if (papel === "lider") {
           syncLiderDeUsuario(state, novo, whatsapp);
+          const liderRow = (state.lideres || []).find((x) => x.usuarioId === novo.id);
+          if (liderRow && entrarNaEscala) liderRow.apareceEmDiaconos = true;
         }
         garantirPerfilDiacono(state, novo, { nome, whatsapp, entrarNaEscala }, logId);
         syncDiaconoWhatsappDoUsuario(state, novo, whatsapp);
@@ -2481,7 +2485,11 @@ window.DiaconiaViewsLider = (() => {
           </label>
           <label class="field"><span><input type="checkbox" data-l="ativo" data-id="${l.id}" ${l.ativo !== false ? "checked" : ""}/> Visível em Minha conta (Falar com um líder)</span></label>
           <label class="field"><span><input type="checkbox" data-l="apareceEmDiaconos" data-id="${l.id}" ${l.apareceEmDiaconos !== false ? "checked" : ""}/> Aparece na aba Diáconos</span></label>
-          <p class="muted" style="font-size:12px;margin:-8px 0 0">Só vale se o líder estiver na escala (Usuários → Entrar na escala). Não afeta a geração da escala.</p>
+          <p class="muted" style="font-size:12px;margin:-8px 0 0">${
+            l.usuarioId
+              ? "Marcado = cria/mantém perfil na escala e lista em Diáconos. Desmarcado = some da lista (ainda pode servir se já estiver na escala)."
+              : "Precisa de conta vinculada em Usuários (papel Liderança) para aparecer em Diáconos."
+          }</p>
         </div>`
       )
       .join("");
@@ -2747,21 +2755,53 @@ window.DiaconiaViewsLider = (() => {
         if (inp.dataset.l === "ativo" || inp.dataset.l === "apareceEmDiaconos") l[inp.dataset.l] = inp.checked;
         else l[inp.dataset.l] = inp.value.trim();
       });
+      const logId = ctx(app).sessao()?.usuarioId;
+      let criados = 0;
       for (const l of state.lideres || []) {
         if (!l.usuarioId) continue;
         const u = state.usuarios.find((x) => x.id === l.usuarioId);
         if (!u) continue;
         u.nome = l.nome;
-        u.whatsapp = waDigits(l.whatsapp);
+        u.whatsapp = waDigits(l.whatsapp || u.whatsapp);
+        if (u.papel !== "lider") continue;
+
+        // Marcou “Aparece na aba Diáconos” → garante perfil de escala (entra em Diáconos)
+        if (l.apareceEmDiaconos !== false) {
+          const antes = u.diaconoId;
+          garantirPerfilDiacono(
+            state,
+            u,
+            { nome: l.nome, whatsapp: u.whatsapp, entrarNaEscala: true },
+            logId
+          );
+          syncDiaconoWhatsappDoUsuario(state, u, u.whatsapp);
+          if (!antes && u.diaconoId) criados += 1;
+        }
+      }
+      // Atualiza sessão se o líder logado acabou de entrar na escala
+      const me = ctx(app).sessao();
+      if (me?.usuarioId) {
+        const uMe = state.usuarios.find((x) => x.id === me.usuarioId);
+        if (uMe) {
+          window.DiaconiaAuth.atualizarSessao({
+            nome: uMe.nome,
+            papel: uMe.papel,
+            diaconoId: uMe.diaconoId || null,
+          });
+        }
       }
       window.DiaconiaHistory.add(state, {
         tipo: "lider",
-        mensagem: `Lista de líderes atualizada (${lideresAtivos(state).length} visível(is) para diáconos).`,
-        usuarioId: ctx(app).sessao()?.usuarioId,
+        mensagem: `Lista de líderes atualizada (${lideresAtivos(state).length} visível(is) em Minha conta).`,
+        usuarioId: logId,
       });
       app.save();
       app.render();
-      UI().toast("Líderes atualizados.");
+      UI().toast(
+        criados
+          ? `Líderes atualizados. ${criados} perfil(is) criado(s) na aba Diáconos.`
+          : "Líderes atualizados."
+      );
     });
 
     root.querySelector("#btn-reset")?.addEventListener("click", async () => {
