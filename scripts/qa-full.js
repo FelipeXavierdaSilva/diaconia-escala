@@ -234,6 +234,55 @@ if (slot) {
   assert("solicitar cobertura", false, "sem slot");
 }
 
+// Cobertura: quem sai está em várias funções — substitui em todas
+{
+  Engine.gerarEscalaData(state, d0, { equipesIds: [eqId] });
+  const fidsLivres = (state.escalas[d0].funcoesIds || funcoes).filter((fid) => !Engine.exigeCasal(state, fid));
+  const fidA = fidsLivres[0];
+  const fidB = fidsLivres[1];
+  const deM = Engine.diaconosDaEquipe(state, eqId).find((d) => d.ativo !== false);
+  const paraM = Engine.diaconosDaEquipe(state, eqId).find((d) => d.id !== deM?.id && d.ativo !== false);
+  if (fidA && fidB && deM && paraM) {
+    const atrM = {};
+    for (const fid of state.escalas[d0].funcoesIds || funcoes) atrM[fid] = [];
+    atrM[fidA] = [deM.id];
+    atrM[fidB] = [deM.id];
+    const man = Engine.salvarEscalaManual(state, d0, eqId, atrM);
+    assert("montar origem em 2 funções", man.ok === true, man.erro || "");
+    if (man.ok) {
+      const solM = Swaps.solicitar(
+        state,
+        {
+          data: d0,
+          equipeId: eqId,
+          funcaoId: fidA,
+          paraDiaconoId: paraM.id,
+          modalidade: "cobertura",
+          deDiaconoId: deM.id,
+        },
+        { diaconoId: deM.id, usuarioId: "u_multi", nome: "Solicitante" }
+      );
+      assert("cobertura multi-função ok", solM.ok === true, solM.erro || "");
+      const depois = state.escalas[d0].atribuicoes?.[eqId] || {};
+      assert(
+        "origem sai das duas funções",
+        !(depois[fidA] || []).includes(deM.id) && !(depois[fidB] || []).includes(deM.id)
+      );
+      assert(
+        "destino assume as duas funções",
+        (depois[fidA] || []).includes(paraM.id) && (depois[fidB] || []).includes(paraM.id)
+      );
+      assert(
+        "slotsCobertura registra as duas",
+        (solM.troca?.slotsCobertura || []).length >= 2,
+        String(solM.troca?.slotsCobertura?.length)
+      );
+    }
+  } else {
+    assert("cobertura multi-função ok", false, "sem funções/diáconos");
+  }
+}
+
 // ——— Auth + storage ———
 Auth.logout();
 assert("login felipe", Auth.login("felipe", "felipe123", state).ok === true);

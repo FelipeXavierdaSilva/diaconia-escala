@@ -1623,6 +1623,15 @@ table.data tbody tr.no-click {
   border: 1px solid #f3c0bc;
 }
 
+.confirm-funcoes {
+  margin: 8px 0 14px;
+  padding-left: 1.25em;
+}
+
+.confirm-funcoes li {
+  margin: 4px 0;
+}
+
 .leader-list {
   display: grid;
   gap: 10px;

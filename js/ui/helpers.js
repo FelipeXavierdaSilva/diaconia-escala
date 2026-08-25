@@ -275,6 +275,127 @@ window.DiaconiaUI = (() => {
     return f ? `${f.emoji} ${f.nome}` : id;
   }
 
+  function listaFuncoesTroca(state, t) {
+    if (t?.modalidade !== "cobertura") {
+      const origem =
+        Array.isArray(t?.slotsOrigem) && t.slotsOrigem.length
+          ? t.slotsOrigem
+          : t?.funcaoId
+            ? [{ funcaoId: t.funcaoId }]
+            : [];
+      const nomes = [];
+      const seen = new Set();
+      for (const s of origem) {
+        const n = nomeFuncao(state, s.funcaoId);
+        if (!n || seen.has(n)) continue;
+        seen.add(n);
+        nomes.push(n);
+      }
+      return nomes;
+    }
+    const slots =
+      Array.isArray(t?.slotsCobertura) && t.slotsCobertura.length
+        ? t.slotsCobertura
+        : t?.funcaoId
+          ? [{ funcaoId: t.funcaoId }]
+          : [];
+    const nomes = [];
+    const seen = new Set();
+    for (const s of slots) {
+      const n = nomeFuncao(state, s.funcaoId);
+      if (!n || seen.has(n)) continue;
+      seen.add(n);
+      nomes.push(n);
+    }
+    return nomes;
+  }
+
+  function nomeFuncoesTroca(state, t) {
+    return listaFuncoesTroca(state, t).join(", ");
+  }
+
+  /**
+   * Confirma cobertura quando a pessoa está em 2+ funções no mesmo culto.
+   * Retorna true se há só uma função (não pergunta) ou se o usuário confirmou.
+   */
+  function confirmarCoberturaTodasFuncoes({
+    nomesFuncoes,
+    dataBr,
+    nomeQuemSai = "",
+    nomeQuemCobre,
+    visao = "pedido",
+  }) {
+    if (!nomesFuncoes || nomesFuncoes.length < 2) return Promise.resolve(true);
+    const lista = `<ul class="confirm-funcoes">${nomesFuncoes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>`;
+    let body;
+    if (visao === "aceite") {
+      body = `<p><strong>${esc(nomeQuemSai)}</strong> pediu para você cobrir <strong>${nomesFuncoes.length} funções</strong> em ${esc(dataBr)}:</p>
+        ${lista}
+        <p>Você assume <strong>todas</strong> elas e deixa qualquer função que já tivesse neste dia.</p>
+        <p class="muted">Confirme só se realmente puder fazer isso.</p>`;
+    } else {
+      const quemSai = nomeQuemSai
+        ? `<strong>${esc(nomeQuemSai)}</strong> está`
+        : "Você está";
+      const saiFora = nomeQuemSai ? `${esc(nomeQuemSai)} fica` : "você fica";
+      body = `<p>${quemSai} em <strong>${nomesFuncoes.length} funções</strong> no culto de ${esc(dataBr)}:</p>
+        ${lista}
+        <p>Se confirmar, <strong>${esc(nomeQuemCobre)}</strong> assume <strong>todas</strong> e ${saiFora} fora deste dia.</p>
+        <p class="muted">Só continue se for isso mesmo que deseja.</p>`;
+    }
+    return confirmModal({
+      title: "Cobrir todas as funções?",
+      body,
+      okText: "Sim, cobrir todas",
+      cancelText: "Não, voltar",
+    });
+  }
+
+  /**
+   * Confirma troca quando alguém está em 2+ funções no mesmo culto.
+   * Retorna true se não há múltiplas funções ou se o usuário confirmou.
+   */
+  function confirmarTrocaTodasFuncoes({
+    nomesOrigem = [],
+    nomesAlvo = [],
+    dataBr,
+    nomeQuemSai = "",
+    nomeQuemEntra = "",
+    visao = "pedido",
+  }) {
+    if ((nomesOrigem || []).length < 2 && (nomesAlvo || []).length < 2) {
+      return Promise.resolve(true);
+    }
+    const bloco = (titulo, nomes) => {
+      if (!nomes.length) {
+        return `<p><strong>${esc(titulo)}</strong> <span class="muted">— livre neste culto</span></p>`;
+      }
+      return `<p><strong>${esc(titulo)}</strong></p>
+        <ul class="confirm-funcoes">${nomes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>`;
+    };
+    const tituloA = nomeQuemSai || "Quem pede";
+    const tituloB = nomeQuemEntra || "Quem recebe";
+    let body;
+    if (visao === "aceite") {
+      body = `<p><strong>${esc(tituloA)}</strong> pediu <strong>troca</strong> em ${esc(dataBr)}. Há diácono com várias funções neste culto.</p>
+        ${bloco(tituloA, nomesOrigem)}
+        ${bloco(tituloB, nomesAlvo)}
+        <p>Se você aceitar, vocês permutam <strong>todas</strong> essas funções neste culto.</p>
+        <p class="muted">Confirme só se realmente quiser esta troca.</p>`;
+    } else {
+      body = `<p>Há <strong>várias funções</strong> no culto de ${esc(dataBr)}. A troca permutará o dia inteiro:</p>
+        ${bloco(tituloA, nomesOrigem)}
+        ${bloco(tituloB, nomesAlvo)}
+        <p>Vocês realmente querem fazer esta troca?</p>`;
+    }
+    return confirmModal({
+      title: "Confirmar troca — várias funções",
+      body,
+      okText: "Sim, fazer a troca",
+      cancelText: "Não, voltar",
+    });
+  }
+
   function nomeMinisterio(state, id) {
     if (!id) return "";
     const m = (state.ministerios || []).find((x) => x.id === id);
@@ -763,6 +884,10 @@ window.DiaconiaUI = (() => {
     equipeNomeDefinido,
     nomeEquipePublico,
     nomeFuncao,
+    listaFuncoesTroca,
+    nomeFuncoesTroca,
+    confirmarCoberturaTodasFuncoes,
+    confirmarTrocaTodasFuncoes,
     nomeMinisterio,
     labelMinisterioDiacono,
     normalizeFilhos,

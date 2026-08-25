@@ -204,8 +204,21 @@ window.DiaconiaEscalaModal = (() => {
         return;
       }
       if (act === "pdf") {
-        const res = window.DiaconiaPDF.gerarEscala(state, data);
-        if (res?.ok === false) UI().toast(res.erro || "Esta escala ainda não foi gerada.");
+        const PDF = window.DiaconiaPDF;
+        const prep = PDF.prepararEscala(state, data);
+        if (prep.avisos?.length) {
+          const ok = await UI().confirmModal({
+            title: "Gerar PDF mesmo assim?",
+            body: `<div class="alert alert-warn"><p style="margin:0">${UI().esc(prep.avisos[0])}</p></div>
+              <p class="muted">A geração não será bloqueada.</p>`,
+            okText: "Continuar e gerar PDF",
+            cancelText: "Cancelar",
+          });
+          if (!ok) return;
+        }
+        const res = PDF.imprimir(prep.titulo, prep.html);
+        if (res?.ok === false) UI().toast(res.erro || "Não foi possível gerar o PDF.");
+        else UI().toast("PDF aberto para impressão.");
         return;
       }
       if (act === "editar-dia" && isLider) {

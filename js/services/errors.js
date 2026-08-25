@@ -1,5 +1,6 @@
 /**
- * Relatos de erro — diáconos reportam; liderança acompanha e gera relatório.
+ * Relatar erro — bugs do sistema (ação falhou / mensagem de erro no portal).
+ * Usuários reportam; liderança acompanha e gera relatório.
  */
 window.DiaconiaErrors = (() => {
   const Engine = () => window.DiaconiaEngine;
@@ -39,9 +40,9 @@ window.DiaconiaErrors = (() => {
     ensure(state);
     const titulo = String(payload.titulo || "").trim();
     const descricao = String(payload.descricao || "").trim();
-    if (!titulo) return { ok: false, erro: "Informe um título curto do problema." };
+    if (!titulo) return { ok: false, erro: "Informe um título curto do que falhou no sistema." };
     if (descricao.length < 8) {
-      return { ok: false, erro: "Descreva o que aconteceu (pelo menos algumas palavras)." };
+      return { ok: false, erro: "Descreva o que você tentou fazer e o que deu errado (pelo menos algumas palavras)." };
     }
 
     const relato = {
@@ -79,7 +80,7 @@ window.DiaconiaErrors = (() => {
       Hist().notify(state, {
         usuarioId: u.id,
         titulo: "Novo relato de erro",
-        corpo: `${sessao?.nome || "Alguém"} reportou: ${titulo}`,
+        corpo: `${sessao?.nome || "Alguém"} reportou falha no sistema: ${titulo}`,
         link: "?ir=erros",
         meta: { tipo: "relato_erro", relatoId: relato.id },
       });
@@ -106,7 +107,7 @@ window.DiaconiaErrors = (() => {
 
     Hist().add(state, {
       tipo: "erro",
-      mensagem: `Relato ${id} → ${STATUS[status].texto}.`,
+      mensagem: `Relato de erro ${id} → ${STATUS[status].texto}.`,
       usuarioId: sessao?.usuarioId,
       meta: { relatoId: id, status },
     });
@@ -114,7 +115,12 @@ window.DiaconiaErrors = (() => {
     if (r.criadoPor && (status === "resolvido" || status === "descartado" || status === "em_analise")) {
       Hist().notify(state, {
         usuarioId: r.criadoPor,
-        titulo: status === "resolvido" ? "Seu relato foi resolvido" : status === "em_analise" ? "Relato em análise" : "Sobre seu relato",
+        titulo:
+          status === "resolvido"
+            ? "Seu relato de erro foi resolvido"
+            : status === "em_analise"
+              ? "Relato de erro em análise"
+              : "Sobre seu relato de erro",
         corpo:
           status === "resolvido"
             ? `Obrigado! O problema “${r.titulo}” foi marcado como resolvido.`
@@ -172,7 +178,7 @@ window.DiaconiaErrors = (() => {
     const igreja = state.configuracoes?.nomeIgreja || "Diaconia";
     const s = resumo(state);
     const linhas = [
-      `RELATÓRIO DE ERROS — ${igreja}`,
+      `RELATÓRIO DE ERROS DO SISTEMA — ${igreja}`,
       `Gerado em: ${new Date().toLocaleString("pt-BR")}`,
       `Total de relatos: ${s.total} | Abertos/em análise: ${s.abertos}`,
       `Abertos: ${s.porStatus.aberto || 0} · Em análise: ${s.porStatus.em_analise || 0} · Resolvidos: ${s.porStatus.resolvido || 0} · Descartados: ${s.porStatus.descartado || 0}`,
@@ -211,7 +217,7 @@ window.DiaconiaErrors = (() => {
     const a = document.createElement("a");
     const stamp = new Date().toISOString().slice(0, 10);
     a.href = url;
-    a.download = `relatorio-erros-diaconia-${stamp}.txt`;
+    a.download = `relatorio-erros-sistema-diaconia-${stamp}.txt`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -228,9 +234,9 @@ window.DiaconiaErrors = (() => {
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;");
-    w.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"/><title>Relatório de erros</title>
+    w.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"/><title>Relatório de erros do sistema</title>
       <style>body{font-family:system-ui,sans-serif;padding:24px;white-space:pre-wrap;line-height:1.45;color:#1a1a1a} h1{font-size:18px}</style>
-      </head><body><h1>Relatório de erros</h1><pre>${esc(texto)}</pre>
+      </head><body><h1>Relatório de erros do sistema</h1><pre>${esc(texto)}</pre>
       <script>window.onload=()=>{window.print()}<\/script></body></html>`);
     w.document.close();
     return { ok: true };

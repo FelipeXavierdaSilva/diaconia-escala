@@ -341,6 +341,7 @@ window.DiaconiaStorage = (() => {
     if (!Array.isArray(state.whatsappFila)) state.whatsappFila = [];
     if (!Array.isArray(state.whatsappLog)) state.whatsappLog = [];
     if (!Array.isArray(state.relatosErro)) state.relatosErro = [];
+    if (!Array.isArray(state.ocorrencias)) state.ocorrencias = [];
     if (!Array.isArray(state.comunicados)) state.comunicados = [];
     if (typeof window.DiaconiaWhatsApp?.ensure === "function") {
       window.DiaconiaWhatsApp.ensure(state);

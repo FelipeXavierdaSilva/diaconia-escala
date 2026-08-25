@@ -5,7 +5,7 @@
 window.DiaconiaApp = (() => {
   const UI = window.DiaconiaUI;
 
-  const PAGINAS_SERVICO = new Set(["minha", "avisos", "conta", "relatar"]);
+  const PAGINAS_SERVICO = new Set(["minha", "avisos", "conta", "ocorrencias", "relatar"]);
 
   const app = {
     state: null,
@@ -94,6 +94,12 @@ window.DiaconiaApp = (() => {
         if (ir === "erros" && sessao.papel === "lider") {
           this.page = "erros";
         }
+        if (ir === "ocorrencias") {
+          const pode =
+            sessao.papel === "diacono" ||
+            sessao.papel === "lider";
+          if (pode) this.page = "ocorrencias";
+        }
         if (
           ir === "relatar" &&
           (sessao.papel === "diacono" || (sessao.papel === "lider" && sessao.diaconoId))
@@ -177,6 +183,7 @@ window.DiaconiaApp = (() => {
         { id: "restricoes", label: "Avisos" },
         { id: "trocas", label: "Troca / Cobrir" },
         { id: "comunicados", label: "Comunicados" },
+        { id: "ocorrencias", label: "Ocorrências" },
         { sep: true, label: "Sistema" },
         { id: "erros", label: "Relatos de erro" },
         { id: "historico", label: "Histórico" },
@@ -188,6 +195,7 @@ window.DiaconiaApp = (() => {
       return [
         { id: "minha", label: "Minha escala" },
         { id: "avisos", label: "Avisos" },
+        { id: "ocorrencias", label: "Ocorrências" },
         { id: "conta", label: "Minha conta" },
         { id: "relatar", label: "Relatar erro" },
       ];
@@ -199,10 +207,11 @@ window.DiaconiaApp = (() => {
         { sep: true, label: "Meu serviço" },
         { id: "minha", label: "Minha escala" },
         { id: "avisos", label: "Meus avisos" },
+        { id: "ocorrencias", label: "Ocorrências" },
         { id: "conta", label: "Minha conta" },
         { id: "relatar", label: "Relatar erro" },
         { sep: true, label: "Gestão" },
-        ...this.navLiderBase(),
+        ...this.navLiderBase().filter((x) => x.id !== "ocorrencias"),
       ];
     },
 

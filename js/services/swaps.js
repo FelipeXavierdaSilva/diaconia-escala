@@ -16,6 +16,79 @@ window.DiaconiaSwaps = (() => {
     return { funcaoAlvo, equipeAlvo };
   }
 
+  function slotsDoDiaconoNaEscala(escala, diaconoId) {
+    const slots = [];
+    for (const [eq, funcoes] of Object.entries(escala?.atribuicoes || {})) {
+      for (const [fid, lista] of Object.entries(funcoes || {})) {
+        if ((lista || []).includes(diaconoId)) {
+          slots.push({ equipeId: eq, funcaoId: fid });
+        }
+      }
+    }
+    return slots;
+  }
+
+  function nomeUmaFuncao(state, funcaoId) {
+    const fn = Engine().getFuncao(state, funcaoId);
+    return fn ? `${fn.emoji || ""} ${fn.nome}`.trim() : funcaoId || "—";
+  }
+
+  function nomesUnicosSlots(state, slots) {
+    const nomes = [];
+    const seen = new Set();
+    for (const s of slots || []) {
+      const id = s.funcaoId;
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      nomes.push(nomeUmaFuncao(state, id));
+    }
+    return nomes;
+  }
+
+  function nomesFuncoesTroca(state, troca) {
+    if (troca?.modalidade !== "cobertura") {
+      const origem =
+        Array.isArray(troca?.slotsOrigem) && troca.slotsOrigem.length
+          ? troca.slotsOrigem
+          : troca?.funcaoId
+            ? [{ funcaoId: troca.funcaoId }]
+            : [];
+      const alvo = Array.isArray(troca?.slotsAlvo) ? troca.slotsAlvo : [];
+      const a = nomesUnicosSlots(state, origem);
+      const b = nomesUnicosSlots(state, alvo);
+      if (b.length) return `${a.join(", ")} ↔ ${b.join(", ")}`;
+      return a.join(", ");
+    }
+    const slots =
+      Array.isArray(troca?.slotsCobertura) && troca.slotsCobertura.length
+        ? troca.slotsCobertura
+        : troca?.funcaoId
+          ? [{ funcaoId: troca.funcaoId }]
+          : [];
+    return nomesUnicosSlots(state, slots).join(", ");
+  }
+
+  function resumoTrocaMultifuncao(state, t) {
+    const escala = state.escalas?.[t.data];
+    const origem = Array.isArray(t.slotsOrigem)
+      ? t.slotsOrigem
+      : slotsDoDiaconoNaEscala(escala, t.deDiaconoId);
+    const alvo = Array.isArray(t.slotsAlvo)
+      ? t.slotsAlvo
+      : slotsDoDiaconoNaEscala(escala, t.paraDiaconoId);
+    const de = state.diaconos.find((d) => d.id === t.deDiaconoId);
+    const para = state.diaconos.find((d) => d.id === t.paraDiaconoId);
+    return {
+      envolve: origem.length > 1 || alvo.length > 1,
+      origem,
+      alvo,
+      nomesOrigem: nomesUnicosSlots(state, origem),
+      nomesAlvo: nomesUnicosSlots(state, alvo),
+      nomeDe: de?.nome || "Diácono",
+      nomePara: para?.nome || "Diácono",
+    };
+  }
+
   function montarTroca(state, payload) {
     const { data, equipeId, funcaoId, paraDiaconoId } = payload;
     const deDiaconoId = payload.deDiaconoId;
@@ -34,9 +107,6 @@ window.DiaconiaSwaps = (() => {
     if (!ids.includes(deDiaconoId)) {
       return { ok: false, erro: "O diácono de origem não está nesta função nesta data." };
     }
-    if (ids.includes(paraDiaconoId)) {
-      return { ok: false, erro: "Os dois já estão nesta função." };
-    }
 
     const origem = state.diaconos.find((d) => d.id === deDiaconoId);
     const alvo = state.diaconos.find((d) => d.id === paraDiaconoId);
@@ -45,13 +115,54 @@ window.DiaconiaSwaps = (() => {
 
     const { funcaoAlvo, equipeAlvo } = localizarFuncaoDoDia(escala, paraDiaconoId, equipeId);
 
-    // Cobertura: quem cobre pode ser da mesma ou de outra equipe (mesmo sem estar escalado no dia)
+    let slotsCobertura = null;
+    let slotsOrigem = null;
+    let slotsAlvo = null;
+    let multifuncao = false;
     if (modalidade === "cobertura") {
-      if (!Engine().candidatoValido(state, alvo, data, funcaoId, new Set())) {
-        return {
-          ok: false,
-          erro: `${alvo.nome} não pode cobrir esta função nesta data (restrição, horário ou permissão).`,
-        };
+      // Quem sai é substituído em todas as funções do culto, não só na selecionada.
+      slotsCobertura = slotsDoDiaconoNaEscala(escala, deDiaconoId);
+      const pendentes = slotsCobertura.filter((s) => {
+        const lista = escala.atribuicoes?.[s.equipeId]?.[s.funcaoId] || [];
+        return !lista.includes(paraDiaconoId);
+      });
+      if (!pendentes.length) {
+        return { ok: false, erro: "Os dois já estão nas mesmas funções neste dia." };
+      }
+      for (const slot of pendentes) {
+        if (!Engine().candidatoValido(state, alvo, data, slot.funcaoId, new Set(), { permitirReuso: true })) {
+          return {
+            ok: false,
+            erro: `${alvo.nome} não pode cobrir ${nomeUmaFuncao(state, slot.funcaoId)} nesta data (restrição, horário ou permissão).`,
+          };
+        }
+      }
+    } else if (ids.includes(paraDiaconoId)) {
+      return { ok: false, erro: "Os dois já estão nesta função." };
+    } else {
+      slotsOrigem = slotsDoDiaconoNaEscala(escala, deDiaconoId);
+      slotsAlvo = slotsDoDiaconoNaEscala(escala, paraDiaconoId);
+      multifuncao = slotsOrigem.length > 1 || slotsAlvo.length > 1;
+      const opts = { permitirReuso: true };
+      for (const slot of slotsOrigem) {
+        const lista = escala.atribuicoes?.[slot.equipeId]?.[slot.funcaoId] || [];
+        if (lista.includes(paraDiaconoId)) continue;
+        if (!Engine().candidatoValido(state, alvo, data, slot.funcaoId, new Set(), opts)) {
+          return {
+            ok: false,
+            erro: `${alvo.nome} não pode assumir ${nomeUmaFuncao(state, slot.funcaoId)} nesta data.`,
+          };
+        }
+      }
+      for (const slot of slotsAlvo) {
+        const lista = escala.atribuicoes?.[slot.equipeId]?.[slot.funcaoId] || [];
+        if (lista.includes(deDiaconoId)) continue;
+        if (!Engine().candidatoValido(state, origem, data, slot.funcaoId, new Set(), opts)) {
+          return {
+            ok: false,
+            erro: `${origem.nome} não pode assumir ${nomeUmaFuncao(state, slot.funcaoId)} nesta data.`,
+          };
+        }
       }
     }
 
@@ -67,6 +178,10 @@ window.DiaconiaSwaps = (() => {
         funcaoId,
         equipeAlvo,
         funcaoAlvo,
+        slotsCobertura,
+        slotsOrigem,
+        slotsAlvo,
+        multifuncao,
         status: "aguardando_aceite",
         criadaEm: new Date().toISOString(),
       },
@@ -102,36 +217,62 @@ window.DiaconiaSwaps = (() => {
     }
 
     const troca = montado.troca;
-    const snapshot = capturarSnapshotEscala(state, troca.data);
-    const aplicado = aplicarNaEscala(state, troca);
-    if (!aplicado.ok) return aplicado;
-
-    troca.escalaSnapshot = snapshot;
-    troca.escalaAplicada = true;
+    if (troca.multifuncao) {
+      troca.escalaAplicada = false;
+      troca.confirmadoOrigem = true;
+    } else {
+      const snapshot = capturarSnapshotEscala(state, troca.data);
+      const aplicado = aplicarNaEscala(state, troca);
+      if (!aplicado.ok) return aplicado;
+      troca.escalaSnapshot = snapshot;
+      troca.escalaAplicada = true;
+    }
 
     state.trocas.push(troca);
     const rotulo = troca.modalidade === "cobertura" ? "cobertura" : "troca";
     Hist().add(state, {
       tipo: "troca",
-      mensagem: `${sessao.nome} solicitou ${rotulo} em ${payload.data} — nomes atualizados na escala (aguardando aceite).`,
+      mensagem: troca.multifuncao
+        ? `${sessao.nome} solicitou ${rotulo} em ${payload.data} com várias funções — aguardando confirmação dos dois (escala ainda não alterada).`
+        : `${sessao.nome} solicitou ${rotulo} em ${payload.data} — nomes atualizados na escala (aguardando aceite).`,
       usuarioId: sessao.usuarioId,
       meta: { trocaId: troca.id },
     });
 
-    const userAlvo = state.usuarios.find((u) => u.diaconoId === troca.paraDiaconoId);
-    if (userAlvo) {
-      const fn = Engine().getFuncao(state, troca.funcaoId);
-      const fnNome = fn ? `${fn.emoji || ""} ${fn.nome}`.trim() : troca.funcaoId;
-      Hist().notify(state, {
-        usuarioId: userAlvo.id,
-        titulo: troca.modalidade === "cobertura" ? "Pedido de cobertura" : "Solicitação de troca",
-        corpo:
-          troca.modalidade === "cobertura"
-            ? `${sessao.nome} pediu para você cobrir ${fnNome} em ${payload.data}. A escala já mostra seu nome — confirme ou recuse em Avisos.`
-            : `${sessao.nome} pediu troca de ${fnNome} em ${payload.data}. A escala já foi ajustada — confirme ou recuse em Avisos.`,
-        link: "?ir=avisos",
-        meta: { tipo: "troca_pendente", trocaId: troca.id },
-      });
+    const fnNome = nomesFuncoesTroca(state, troca);
+    const variasCob = (troca.slotsCobertura || []).length > 1;
+    const resumo = troca.multifuncao ? resumoTrocaMultifuncao(state, troca) : null;
+
+    if (troca.multifuncao && resumo) {
+      const detalhe = `${resumo.nomeDe}: ${resumo.nomesOrigem.join(", ") || "—"}. ${resumo.nomePara}: ${resumo.nomesAlvo.join(", ") || "livre neste dia"}.`;
+      for (const did of [troca.deDiaconoId, troca.paraDiaconoId]) {
+        const u = state.usuarios.find((x) => x.diaconoId === did);
+        if (!u) continue;
+        const souAlvo = did === troca.paraDiaconoId;
+        Hist().notify(state, {
+          usuarioId: u.id,
+          titulo: souAlvo ? "Confirme a troca — várias funções" : "Pedido enviado — várias funções",
+          corpo: souAlvo
+            ? `${sessao.nome} pediu troca em ${payload.data}. ${detalhe} Se você aceitar, permutam todas as funções deste culto. Confirme em Avisos.`
+            : `Você pediu troca em ${payload.data}. ${detalhe} A escala só muda quando ${resumo.nomePara} confirmar.`,
+          link: "?ir=avisos",
+          meta: { tipo: "troca_pendente", trocaId: troca.id, multifuncao: true },
+        });
+      }
+    } else {
+      const userAlvo = state.usuarios.find((u) => u.diaconoId === troca.paraDiaconoId);
+      if (userAlvo) {
+        Hist().notify(state, {
+          usuarioId: userAlvo.id,
+          titulo: troca.modalidade === "cobertura" ? "Pedido de cobertura" : "Solicitação de troca",
+          corpo:
+            troca.modalidade === "cobertura"
+              ? `${sessao.nome} pediu para você cobrir ${fnNome} em ${payload.data}.${variasCob ? " São todas as funções dela neste culto." : ""} A escala já mostra seu nome — confirme ou recuse em Avisos.`
+              : `${sessao.nome} pediu troca de ${fnNome} em ${payload.data}. A escala já foi ajustada — confirme ou recuse em Avisos.`,
+          link: "?ir=avisos",
+          meta: { tipo: "troca_pendente", trocaId: troca.id },
+        });
+      }
     }
 
     let whatsapp = null;
@@ -157,6 +298,7 @@ window.DiaconiaSwaps = (() => {
     if (!t.escalaAplicada) {
       const aplicado = aplicarNaEscala(state, t);
       if (!aplicado.ok) return aplicado;
+      t.escalaAplicada = true;
     }
 
     t.status = "aprovada";
@@ -183,9 +325,13 @@ window.DiaconiaSwaps = (() => {
       Hist().notify(state, {
         usuarioId: u.id,
         titulo: `${rotulo} confirmada`,
-        corpo: souAlvo
-          ? `Você confirmou o pedido de ${t.data}. A escala permanece atualizada.`
-          : `${b?.nome || "O diácono"} confirmou seu pedido de ${t.data}.`,
+        corpo: t.multifuncao
+          ? souAlvo
+            ? `Você confirmou a troca de ${t.data}. As funções deste culto foram permutadas.`
+            : `${b?.nome || "O diácono"} confirmou. A troca de ${t.data} foi aplicada na escala.`
+          : souAlvo
+            ? `Você confirmou o pedido de ${t.data}. A escala permanece atualizada.`
+            : `${b?.nome || "O diácono"} confirmou seu pedido de ${t.data}.`,
         meta: { tipo: "troca_concluida", trocaId: t.id },
       });
     }
@@ -276,14 +422,24 @@ window.DiaconiaSwaps = (() => {
       paraDiaconoId: montado.troca.paraDiaconoId,
       equipeAlvo: montado.troca.equipeAlvo,
       funcaoAlvo: montado.troca.funcaoAlvo,
+      slotsCobertura: montado.troca.slotsCobertura,
+      slotsOrigem: montado.troca.slotsOrigem,
+      slotsAlvo: montado.troca.slotsAlvo,
+      multifuncao: montado.troca.multifuncao,
       atualizadaEm: new Date().toISOString(),
     });
 
-    const snapshot = capturarSnapshotEscala(state, t.data);
-    const aplicado = aplicarNaEscala(state, t);
-    if (!aplicado.ok) return aplicado;
-    t.escalaSnapshot = snapshot;
-    t.escalaAplicada = true;
+    if (t.multifuncao) {
+      t.escalaAplicada = false;
+      t.confirmadoOrigem = true;
+      delete t.escalaSnapshot;
+    } else {
+      const snapshot = capturarSnapshotEscala(state, t.data);
+      const aplicado = aplicarNaEscala(state, t);
+      if (!aplicado.ok) return aplicado;
+      t.escalaSnapshot = snapshot;
+      t.escalaAplicada = true;
+    }
 
     const rotulo = t.modalidade === "cobertura" ? "cobertura" : "troca";
     Hist().add(state, {
@@ -294,8 +450,7 @@ window.DiaconiaSwaps = (() => {
     });
 
     if (antigoPara !== t.paraDiaconoId) {
-      const fn = Engine().getFuncao(state, t.funcaoId);
-      const fnNome = fn ? `${fn.emoji || ""} ${fn.nome}`.trim() : t.funcaoId;
+      const fnNome = nomesFuncoesTroca(state, t);
       const userAlvo = state.usuarios.find((u) => u.diaconoId === t.paraDiaconoId);
       if (userAlvo) {
         Hist().notify(state, {
@@ -349,8 +504,9 @@ window.DiaconiaSwaps = (() => {
   }
 
   /**
-   * troca: se B já tem função no dia, troca as funções; senão B assume e A sai.
-   * cobertura: B assume a função de A; A sai; se B já tinha função no dia, deixa a antiga (não herda A).
+   * troca: permuta as funções do dia (se alguém tem várias, permuta todas).
+   * cobertura: B assume todas as funções de A neste culto; A fica fora do dia.
+   *            Se B já tinha função, deixa a antiga (não herda a de A em troca).
    */
   function aplicarNaEscala(state, t) {
     const escala = state.escalas[t.data];
@@ -366,51 +522,98 @@ window.DiaconiaSwaps = (() => {
     const modalidade = t.modalidade === "cobertura" ? "cobertura" : "troca";
 
     if (modalidade === "cobertura") {
-      if (!Engine().candidatoValido(state, b, t.data, t.funcaoId, new Set())) {
-        return { ok: false, erro: `${b.nome} não pode cobrir esta função.` };
+      const slotsCompletos = Array.isArray(t.slotsCobertura) && t.slotsCobertura.length;
+      const slots = slotsCompletos
+        ? t.slotsCobertura
+        : [{ equipeId: t.equipeId, funcaoId: t.funcaoId }];
+
+      for (const slot of slots) {
+        const lista = atr[slot.equipeId]?.[slot.funcaoId] || [];
+        if (lista.includes(t.paraDiaconoId)) continue;
+        if (!Engine().candidatoValido(state, b, t.data, slot.funcaoId, new Set(), { permitirReuso: true })) {
+          return { ok: false, erro: `${b.nome} não pode cobrir ${nomeUmaFuncao(state, slot.funcaoId)}.` };
+        }
       }
-      // Remove B de qualquer outra função no dia (pode vir de outra equipe)
-      for (const funcoes of Object.values(atr)) {
+
+      const chavesSlots = new Set(slots.map((s) => `${s.equipeId}|${s.funcaoId}`));
+
+      // B deixa funções que não vai herdar de A
+      for (const [eq, funcoes] of Object.entries(atr)) {
         for (const fid of Object.keys(funcoes)) {
+          if (chavesSlots.has(`${eq}|${fid}`)) continue;
           funcoes[fid] = (funcoes[fid] || []).filter((id) => id !== t.paraDiaconoId);
         }
       }
-      const listaA = atr[t.equipeId][t.funcaoId] || [];
-      atr[t.equipeId][t.funcaoId] = listaA.map((id) =>
-        id === t.deDiaconoId ? t.paraDiaconoId : id
-      );
+      for (const slot of slots) {
+        if (!atr[slot.equipeId]) atr[slot.equipeId] = {};
+        const listaA = atr[slot.equipeId][slot.funcaoId] || [];
+        if (listaA.includes(t.paraDiaconoId)) {
+          atr[slot.equipeId][slot.funcaoId] = listaA.filter((id) => id !== t.deDiaconoId);
+        } else {
+          atr[slot.equipeId][slot.funcaoId] = listaA.map((id) =>
+            id === t.deDiaconoId ? t.paraDiaconoId : id
+          );
+        }
+      }
+      if (slotsCompletos) {
+        for (const funcoes of Object.values(atr)) {
+          for (const fid of Object.keys(funcoes)) {
+            funcoes[fid] = (funcoes[fid] || []).filter((id) => id !== t.deDiaconoId);
+          }
+        }
+      }
       // A sai e não assume a função antiga de B
-    } else if (t.funcaoAlvo) {
-      if (!atr[t.equipeAlvo]) atr[t.equipeAlvo] = {};
-      const listaA = atr[t.equipeId][t.funcaoId] || [];
-      const listaB = atr[t.equipeAlvo][t.funcaoAlvo] || [];
-
-      if (!Engine().candidatoValido(state, b, t.data, t.funcaoId, new Set())) {
-        return { ok: false, erro: `${b.nome} não pode assumir a função de origem.` };
-      }
-      if (!Engine().candidatoValido(state, a, t.data, t.funcaoAlvo, new Set())) {
-        return { ok: false, erro: `${a.nome} não pode assumir a função de destino.` };
-      }
-
-      atr[t.equipeId][t.funcaoId] = listaA.map((id) =>
-        id === t.deDiaconoId ? t.paraDiaconoId : id
-      );
-      atr[t.equipeAlvo][t.funcaoAlvo] = listaB.map((id) =>
-        id === t.paraDiaconoId ? t.deDiaconoId : id
-      );
     } else {
-      if (!Engine().candidatoValido(state, b, t.data, t.funcaoId, new Set())) {
-        return { ok: false, erro: `${b.nome} não pode assumir esta função.` };
-      }
-      for (const funcoes of Object.values(atr)) {
-        for (const fid of Object.keys(funcoes)) {
-          funcoes[fid] = (funcoes[fid] || []).filter((id) => id !== t.paraDiaconoId);
+      const slotsA =
+        Array.isArray(t.slotsOrigem) && t.slotsOrigem.length
+          ? t.slotsOrigem
+          : [{ equipeId: t.equipeId, funcaoId: t.funcaoId }];
+      const slotsB = Array.isArray(t.slotsAlvo)
+        ? t.slotsAlvo
+        : t.funcaoAlvo
+          ? [{ equipeId: t.equipeAlvo, funcaoId: t.funcaoAlvo }]
+          : [];
+
+      for (const slot of slotsA) {
+        if (!Engine().candidatoValido(state, b, t.data, slot.funcaoId, new Set(), { permitirReuso: true })) {
+          return { ok: false, erro: `${b.nome} não pode assumir ${nomeUmaFuncao(state, slot.funcaoId)}.` };
         }
       }
-      const listaA = atr[t.equipeId][t.funcaoId] || [];
-      atr[t.equipeId][t.funcaoId] = listaA.map((id) =>
-        id === t.deDiaconoId ? t.paraDiaconoId : id
-      );
+      for (const slot of slotsB) {
+        if (!Engine().candidatoValido(state, a, t.data, slot.funcaoId, new Set(), { permitirReuso: true })) {
+          return { ok: false, erro: `${a.nome} não pode assumir ${nomeUmaFuncao(state, slot.funcaoId)}.` };
+        }
+      }
+
+      if (!slotsB.length) {
+        for (const funcoes of Object.values(atr)) {
+          for (const fid of Object.keys(funcoes)) {
+            funcoes[fid] = (funcoes[fid] || []).filter((id) => id !== t.paraDiaconoId);
+          }
+        }
+        for (const slot of slotsA) {
+          if (!atr[slot.equipeId]) atr[slot.equipeId] = {};
+          const listaA = atr[slot.equipeId][slot.funcaoId] || [];
+          atr[slot.equipeId][slot.funcaoId] = listaA.map((id) =>
+            id === t.deDiaconoId ? t.paraDiaconoId : id
+          );
+        }
+      } else {
+        for (const slot of slotsA) {
+          if (!atr[slot.equipeId]) atr[slot.equipeId] = {};
+          const listaA = atr[slot.equipeId][slot.funcaoId] || [];
+          atr[slot.equipeId][slot.funcaoId] = listaA.map((id) =>
+            id === t.deDiaconoId ? t.paraDiaconoId : id
+          );
+        }
+        for (const slot of slotsB) {
+          if (!atr[slot.equipeId]) atr[slot.equipeId] = {};
+          const listaB = atr[slot.equipeId][slot.funcaoId] || [];
+          atr[slot.equipeId][slot.funcaoId] = listaB.map((id) =>
+            id === t.paraDiaconoId ? t.deDiaconoId : id
+          );
+        }
+      }
     }
 
     escala.status = Engine().statusEscala(escala, state);
@@ -508,7 +711,9 @@ window.DiaconiaSwaps = (() => {
         Hist().notify(state, {
           usuarioId: u.id,
           titulo: `${rotulo} na escala`,
-          corpo: `A liderança registrou uma ${rotulo.toLowerCase()} em ${troca.data}: ${aplicado.a.nome} → ${aplicado.b.nome}.`,
+          corpo: troca.multifuncao
+            ? `A liderança registrou uma troca em ${troca.data} permutando todas as funções deste culto: ${aplicado.a.nome} ↔ ${aplicado.b.nome}.`
+            : `A liderança registrou uma ${rotulo.toLowerCase()} em ${troca.data}: ${aplicado.a.nome} → ${aplicado.b.nome}.`,
         });
       }
     }
@@ -552,5 +757,18 @@ window.DiaconiaSwaps = (() => {
     return { ok: true, troca: t };
   }
 
-  return { solicitar, aceitar, recusar, atualizar, excluir, aprovar, rejeitar, executarPeloLider, concluirPendentesSemLider };
+  return {
+    solicitar,
+    aceitar,
+    recusar,
+    atualizar,
+    excluir,
+    aprovar,
+    rejeitar,
+    executarPeloLider,
+    concluirPendentesSemLider,
+    slotsDoDiaconoNaEscala,
+    nomesFuncoesTroca,
+    resumoTrocaMultifuncao,
+  };
 })();

@@ -425,6 +425,7 @@ window.DiaconiaSeed = (() => {
       whatsappLog: [],
       comunicados: [],
       relatosErro: [],
+      ocorrencias: [],
       configuracoes: {
         nomeIgreja: "Diaconia Viva",
         horarioPadrao: "18:00",

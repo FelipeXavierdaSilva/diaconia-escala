@@ -101,6 +101,13 @@ window.DiaconiaWhatsApp = (() => {
     return f ? `${f.emoji || ""} ${f.nome}`.trim() : funcaoId || "—";
   }
 
+  function nomesFuncoesTroca(state, troca) {
+    if (typeof window.DiaconiaSwaps?.nomesFuncoesTroca === "function") {
+      return window.DiaconiaSwaps.nomesFuncoesTroca(state, troca);
+    }
+    return nomeFuncao(state, troca?.funcaoId);
+  }
+
   function nomeDiacono(state, diaconoId) {
     return state.diaconos.find((d) => d.id === diaconoId)?.nome || "Diácono";
   }
@@ -381,18 +388,24 @@ window.DiaconiaWhatsApp = (() => {
     if (tipo === "pedido_troca" || tipo === "pedido_cobertura") {
       const { troca, deNome } = dados;
       const alvo = state.diaconos.find((d) => d.id === troca.paraDiaconoId);
-      const fnNome = nomeFuncao(state, troca.funcaoId);
+      const fnNome = nomesFuncoesTroca(state, troca);
       const dataBr = Cal().formatBR(troca.data);
       const link = portalUrl(state, "?ir=avisos");
       const quem = deNome || "Alguém da diaconia";
       const nome = primeiroNome(alvo?.nome) || alvo?.nome || "";
+      const varias = (troca.slotsCobertura || []).length > 1;
+      const rotuloFn = varias ? "Funções" : "Função";
+      const multiTroca =
+        troca.modalidade !== "cobertura" &&
+        (troca.multifuncao || (troca.slotsOrigem || []).length > 1 || (troca.slotsAlvo || []).length > 1);
 
       if (troca.modalidade === "cobertura" || tipo === "pedido_cobertura") {
         return (
           `Olá, ${nome}! 👋\n\n` +
           `*${quem}* pediu sua *cobertura* na escala do diaconato:\n\n` +
           `📅 *Data:* ${dataBr}\n` +
-          `📋 *Função:* ${fnNome}\n` +
+          `📋 *${rotuloFn}:* ${fnNome}\n` +
+          (varias ? `⚠️ Quem sai será substituído em *todas* as funções deste culto.\n` : "") +
           `⛪ *${igreja}*\n\n` +
           `Sua escala já foi atualizada provisoriamente. Entre no portal, abra *Avisos* e toque em *Aceitar* ou *Recusar*:\n\n` +
           `${link}\n\n` +
@@ -405,8 +418,13 @@ window.DiaconiaWhatsApp = (() => {
         `*${quem}* pediu *troca* de função na escala:\n\n` +
         `📅 *Data:* ${dataBr}\n` +
         `📋 *Função:* ${fnNome}\n` +
+        (multiTroca
+          ? `⚠️ Há diácono com *várias funções* neste culto. Se você aceitar, permutam *todas* as funções deste dia.\n`
+          : "") +
         `⛪ *${igreja}*\n\n` +
-        `A escala já foi ajustada provisoriamente. Confirme ou recuse em *Avisos* no portal:\n\n` +
+        (multiTroca
+          ? `A escala *ainda não mudou*. Confirme ou recuse em *Avisos* no portal:\n\n`
+          : `A escala já foi ajustada provisoriamente. Confirme ou recuse em *Avisos* no portal:\n\n`) +
         `${link}\n\n` +
         `Use seu login e senha cadastrados.`
       );
@@ -416,16 +434,22 @@ window.DiaconiaWhatsApp = (() => {
       const { troca, porNome } = dados;
       const solicitante = state.diaconos.find((d) => d.id === troca.deDiaconoId);
       const nome = primeiroNome(solicitante?.nome) || solicitante?.nome || "";
-      const fnNome = nomeFuncao(state, troca.funcaoId);
+      const fnNome = nomesFuncoesTroca(state, troca);
       const dataBr = Cal().formatBR(troca.data);
       const link = portalUrl(state, "?ir=avisos");
       const rotulo = troca.modalidade === "cobertura" ? "cobertura" : "troca";
+      const rotuloFn =
+        (troca.slotsCobertura || []).length > 1 ||
+        (troca.slotsOrigem || []).length > 1 ||
+        (troca.slotsAlvo || []).length > 1
+          ? "Funções"
+          : "Função";
 
       return (
         `Olá, ${nome}! ✅\n\n` +
         `*${porNome || "O diácono"}* *aceitou* seu pedido de ${rotulo}:\n\n` +
         `📅 *Data:* ${dataBr}\n` +
-        `📋 *Função:* ${fnNome}\n\n` +
+        `📋 *${rotuloFn}:* ${fnNome}\n\n` +
         `A escala está confirmada. Veja no portal:\n${link}`
       );
     }

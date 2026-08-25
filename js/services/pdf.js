@@ -1,313 +1,218 @@
 /**
-
  * Geração de PDF via janela de impressão (sem dependências).
-
- * Inclui apenas escalas geradas pelo botão "Gerar escala" (escala.gerada === true).
-
+ * Inclui escalas cadastradas — mesmo incompletas (com aviso na UI).
  */
-
 window.DiaconiaPDF = (() => {
-
   const Cal = () => window.DiaconiaCalendar;
-
   const Engine = () => window.DiaconiaEngine;
 
-
-
   function nomeDiacono(state, id) {
-
     return state.diaconos.find((d) => d.id === id)?.nome || id;
-
   }
 
+  /** Todas as escalas do mês (cadastradas), não só as “geradas”. */
+  function escalasDoMes(state, ano, mes) {
+    return Cal().escalasDoMes(state, ano, mes);
+  }
 
-
-  function escalasGeradas(state, ano, mes) {
-
-    if (typeof Engine().escalasGeradasDoMes === "function") {
-
-      return Engine().escalasGeradasDoMes(state, ano, mes);
-
+  function escalaIncompleta(state, esc) {
+    if (!esc) return true;
+    const st = Engine().statusEscala?.(esc, state);
+    if (st === "incompleta" || st === "rascunho" || st === "em_edicao") return true;
+    if (esc.problemas?.length) return true;
+    const eqs = esc.equipesIds || [];
+    if (!eqs.length) return true;
+    const funcoes = esc.funcoesIds || state.funcoesPadraoCulto || [];
+    if (!funcoes.length) return false;
+    for (const eqId of eqs) {
+      for (const fid of funcoes) {
+        const f = Engine().getFuncao(state, fid);
+        if (f && f.ativo === false) continue;
+        const qtd = f?.qtdPorEquipe || 1;
+        const ids = esc.atribuicoes?.[eqId]?.[fid] || [];
+        if (ids.length < qtd) return true;
+      }
     }
-
-    return Cal().escalasDoMes(state, ano, mes).filter((e) => e.gerada === true);
-
+    return false;
   }
-
-
 
   function htmlEscala(state, escala) {
-
     const CalX = Cal();
+    const incompleta = escalaIncompleta(state, escala);
+    const st = Engine().statusEscala?.(escala, state);
+    const labelSt = Engine().labelStatus?.(st)?.texto || st || "";
 
     let html = `<h1>Escala — ${CalX.formatBR(escala.data)}</h1>
+      <p><strong>${escala.nome || "Culto"}</strong> · ${CalX.diaSemana(escala.data)} · ${escala.horario || ""}`;
+    if (incompleta) {
+      html += ` · <em style="color:#a15c00">Incompleta${labelSt ? ` (${labelSt})` : ""}</em>`;
+    }
+    html += `</p>`;
 
-      <p><strong>${escala.nome}</strong> · ${CalX.diaSemana(escala.data)} · ${escala.horario}</p>`;
+    const eqs = escala.equipesIds || [];
+    if (!eqs.length) {
+      html += `<p><em>Sem equipe definida neste dia.</em></p>`;
+      return html;
+    }
 
-
-
-    for (const eqId of escala.equipesIds || []) {
-
+    for (const eqId of eqs) {
       const eq = state.equipes.find((e) => e.id === eqId);
-
       html += `<h2>${eq?.nome || eqId}</h2><table><thead><tr><th>Função</th><th>Horário</th><th>Responsáveis</th></tr></thead><tbody>`;
-
-      for (const fid of escala.funcoesIds || []) {
-
+      for (const fid of escala.funcoesIds || state.funcoesPadraoCulto || []) {
         const f = Engine().getFuncao(state, fid);
-
+        if (f && f.ativo === false) continue;
         const ids = escala.atribuicoes?.[eqId]?.[fid] || [];
-
-        html += `<tr><td>${f?.emoji || ""} ${f?.nome || fid}</td><td>${f?.horario || ""}</td><td>${ids.map((id) => nomeDiacono(state, id)).join(", ") || "—"}</td></tr>`;
-
+        const nomes = ids.map((id) => nomeDiacono(state, id)).join(", ") || "—";
+        const vazio = !ids.length;
+        html += `<tr${vazio ? ' style="background:#fff8e8"' : ""}><td>${f?.emoji || ""} ${f?.nome || fid}</td><td>${f?.horario || ""}</td><td>${nomes}</td></tr>`;
       }
-
       html += `</tbody></table>`;
+    }
 
+    if (escala.problemas?.length) {
+      html += `<p style="font-size:12px;color:#a15c00"><strong>Pendências:</strong> ${escala.problemas
+        .map((p) => p.mensagem)
+        .join(" · ")}</p>`;
     }
 
     return html;
-
   }
 
-
-
-  function htmlMes(state, ano, mes) {
-
-    const lista = escalasGeradas(state, ano, mes);
-
-    let html = `<h1>Escala mensal — ${Cal().nomeMes(mes)} ${ano}</h1>`;
-
-    for (const esc of lista) html += htmlEscala(state, esc) + "<hr/>";
-
-    return html;
-
-  }
-
-
-
-  function htmlPeriodo(state, anoInicio, mesInicio, qtdMeses) {
-
-    let html = "";
-
-    let ano = anoInicio;
-
-    let mes = mesInicio;
-
-    const qtd = Math.min(12, Math.max(1, Number(qtdMeses) || 1));
-
-    let incluidos = 0;
-
-    for (let i = 0; i < qtd; i++) {
-
-      const lista = escalasGeradas(state, ano, mes);
-
-      if (lista.length) {
-
-        if (incluidos) html += '<hr style="margin:32px 0;border:none;border-top:2px solid #ccc"/>';
-
-        html += htmlMes(state, ano, mes);
-
-        incluidos += 1;
-
+  function prepararLista(state, lista, titulo) {
+    const incompletas = lista.filter((e) => escalaIncompleta(state, e));
+    let html = `<h1>${titulo}</h1>`;
+    if (!lista.length) {
+      html += `<p>Nenhuma escala cadastrada neste período.</p>`;
+    } else {
+      if (incompletas.length) {
+        html += `<p style="font-size:13px;color:#a15c00"><strong>Atenção:</strong> ${incompletas.length} de ${lista.length} escala(s) incompleta(s) — vagas em aberto aparecem como “—”.</p>`;
       }
-
-      mes += 1;
-
-      if (mes > 12) {
-
-        mes = 1;
-
-        ano += 1;
-
-      }
-
+      for (const esc of lista) html += htmlEscala(state, esc) + "<hr/>";
     }
-
-    return incluidos
-
-      ? html
-
-      : `<p>Nenhuma escala cadastrada neste período.</p>`;
-
+    return {
+      titulo,
+      html,
+      total: lista.length,
+      incompletas: incompletas.length,
+      avisos: montarAvisos(lista.length, incompletas.length),
+    };
   }
 
-
-
-  function htmlTudo(state) {
-
-    const datas = Object.keys(state.escalas || {})
-
-      .filter((d) => state.escalas[d]?.gerada === true)
-
-      .sort();
-
-    if (!datas.length) {
-
-      return `<p>Nenhuma escala cadastrada.</p>`;
-
+  function montarAvisos(total, incompletas) {
+    const avisos = [];
+    if (!total) {
+      avisos.push("Não há escalas cadastradas neste período. O PDF sairá praticamente vazio.");
+    } else if (incompletas > 0) {
+      avisos.push(
+        `${incompletas} escala(s) ainda incompleta(s) (vagas sem pessoa). O PDF será gerado mesmo assim.`
+      );
     }
-
-    const mesesVistos = new Set();
-
-    let html = "";
-
-    let incluidos = 0;
-
-    for (const data of datas) {
-
-      const [ano, mes] = data.split("-").map(Number);
-
-      const chave = `${ano}-${mes}`;
-
-      if (mesesVistos.has(chave)) continue;
-
-      mesesVistos.add(chave);
-
-      const lista = escalasGeradas(state, ano, mes);
-
-      if (!lista.length) continue;
-
-      if (incluidos) html += '<hr style="margin:32px 0;border:none;border-top:2px solid #ccc"/>';
-
-      html += htmlMes(state, ano, mes);
-
-      incluidos += 1;
-
-    }
-
-    return html;
-
+    return avisos;
   }
 
+  function prepararMes(state, ano, mes) {
+    const lista = escalasDoMes(state, ano, mes);
+    return prepararLista(state, lista, `Escala mensal — ${Cal().nomeMes(mes)} ${ano}`);
+  }
 
+  function prepararTudo(state) {
+    const datas = Object.keys(state.escalas || {}).sort();
+    const lista = datas.map((d) => state.escalas[d]).filter(Boolean);
+    return prepararLista(state, lista, "Escala completa");
+  }
+
+  function prepararEscala(state, data) {
+    const esc = state.escalas[data];
+    if (!esc) {
+      return {
+        titulo: `Escala ${data}`,
+        html: `<p>Escala não encontrada para ${data}.</p>`,
+        total: 0,
+        incompletas: 0,
+        avisos: ["Esta data não tem escala cadastrada."],
+      };
+    }
+    const incompleta = escalaIncompleta(state, esc);
+    return {
+      titulo: `Escala ${data}`,
+      html: htmlEscala(state, esc),
+      total: 1,
+      incompletas: incompleta ? 1 : 0,
+      avisos: incompleta
+        ? ["Esta escala está incompleta. O PDF será gerado com as vagas em aberto."]
+        : [],
+    };
+  }
 
   function imprimir(titulo, corpoHtml) {
-
     const w = window.open("", "_blank");
-
     if (!w) {
-
-      alert("Permita pop-ups para gerar o PDF.");
-
-      return false;
-
+      return { ok: false, erro: "Permita pop-ups para gerar o PDF." };
     }
-
     w.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"/>
-
       <title>${titulo}</title>
-
       <style>
-
         body{font-family:Georgia,serif;padding:24px;color:#1a1a1a}
-
         h1{font-size:22px} h2{font-size:16px;margin-top:20px}
-
         table{width:100%;border-collapse:collapse;margin:8px 0 16px}
-
         th,td{border:1px solid #ccc;padding:6px 8px;text-align:left;font-size:12px}
-
         th{background:#f0f0f0}
-
         hr{border:none;border-top:1px solid #ddd;margin:28px 0}
-
         @media print{body{padding:0}}
-
       </style></head><body>${corpoHtml}
-
-      <script>window.onload=()=>{window.print();}</script>
-
+      <script>window.onload=()=>{window.print();}<\/script>
       </body></html>`);
-
     w.document.close();
-
-    return true;
-
-  }
-
-
-
-  function contemEscalasGeradas(corpoHtml) {
-
-    return corpoHtml && !corpoHtml.includes("Nenhuma escala cadastrada");
-
-  }
-
-
-
-  function gerarEscala(state, data) {
-
-    const esc = state.escalas[data];
-
-    if (!esc?.gerada) return { ok: false, erro: "Esta data ainda não foi gerada. Use Gerar escala." };
-
-    imprimir(`Escala ${data}`, htmlEscala(state, esc));
-
     return { ok: true };
-
   }
 
+  function gerarComPreparacao(prep) {
+    const print = imprimir(prep.titulo, prep.html);
+    if (!print.ok) return print;
+    return { ok: true, ...prep };
+  }
 
-
+  /** @deprecated prefer prepararMes + imprimir; mantido para compat */
   function gerarMes(state, ano, mes) {
-
-    const html = htmlMes(state, ano, mes);
-
-    if (!escalasGeradas(state, ano, mes).length) {
-
-      return { ok: false, erro: "Nenhuma escala cadastrada neste mês." };
-
-    }
-
-    imprimir(`Escala ${mes}/${ano}`, html);
-
-    return { ok: true };
-
+    return gerarComPreparacao(prepararMes(state, ano, mes));
   }
-
-
-
-  function gerarPeriodo(state, anoInicio, mesInicio, qtdMeses) {
-
-    const qtd = Math.min(12, Math.max(1, Number(qtdMeses) || 1));
-
-    const html = htmlPeriodo(state, anoInicio, mesInicio, qtd);
-
-    if (!contemEscalasGeradas(html)) {
-
-      return { ok: false, erro: "Nenhuma escala cadastrada no período." };
-
-    }
-
-    imprimir(`Escala — ${qtd} mês(es)`, html);
-
-    return { ok: true };
-
-  }
-
-
 
   function gerarTudo(state) {
-
-    const html = htmlTudo(state);
-
-    if (!contemEscalasGeradas(html)) {
-
-      return { ok: false, erro: "Nenhuma escala cadastrada." };
-
-    }
-
-    imprimir("Escala completa", html);
-
-    return { ok: true };
-
+    return gerarComPreparacao(prepararTudo(state));
   }
 
+  function gerarEscala(state, data) {
+    return gerarComPreparacao(prepararEscala(state, data));
+  }
 
+  function gerarPeriodo(state, anoInicio, mesInicio, qtdMeses) {
+    let ano = anoInicio;
+    let mes = mesInicio;
+    const qtd = Math.min(12, Math.max(1, Number(qtdMeses) || 1));
+    const todas = [];
+    for (let i = 0; i < qtd; i++) {
+      todas.push(...escalasDoMes(state, ano, mes));
+      mes += 1;
+      if (mes > 12) {
+        mes = 1;
+        ano += 1;
+      }
+    }
+    return gerarComPreparacao(
+      prepararLista(state, todas, `Escala — ${qtd} mês(es)`)
+    );
+  }
 
-  return { gerarEscala, gerarMes, gerarPeriodo, gerarTudo };
-
+  return {
+    escalasDoMes,
+    escalaIncompleta,
+    prepararMes,
+    prepararTudo,
+    prepararEscala,
+    imprimir,
+    gerarEscala,
+    gerarMes,
+    gerarPeriodo,
+    gerarTudo,
+  };
 })();
-
-

@@ -525,7 +525,7 @@ window.DiaconiaViewsLider = (() => {
 
     UI().openModal(`
       <h2>Gerar PDF</h2>
-      <p class="muted" style="margin-top:-4px">Inclui apenas escalas já cadastradas no sistema.</p>
+      <p class="muted" style="margin-top:-4px">Inclui as escalas cadastradas — mesmo incompletas (com aviso antes de continuar).</p>
       <label class="field"><span><input type="radio" name="pdf-modo" id="pdf-modo-mes" value="mes" checked/> Mês atual — ${UI().esc(Cal().nomeMes(mes))} ${ano}</span></label>
       <label class="field"><span><input type="radio" name="pdf-modo" id="pdf-modo-tudo" value="tudo"/> Gerar tudo</span></label>
       <div class="modal-actions">
@@ -535,20 +535,35 @@ window.DiaconiaViewsLider = (() => {
     `);
 
     const root = document.getElementById("modal-root");
-    root.addEventListener("click", (e) => {
+    root.addEventListener("click", async (e) => {
       const act = e.target.closest("[data-act]")?.dataset.act;
       if (act === "cancel") return UI().closeModal();
       if (act !== "pdf") return;
 
       const tudo = !!root.querySelector("#pdf-modo-tudo")?.checked;
-      const res = tudo
-        ? window.DiaconiaPDF.gerarTudo(state)
-        : window.DiaconiaPDF.gerarMes(state, ano, mes);
-      if (res?.ok === false) {
-        UI().toast(res.erro || "Nenhuma escala cadastrada neste período.");
+      const PDF = window.DiaconiaPDF;
+      const prep = tudo ? PDF.prepararTudo(state) : PDF.prepararMes(state, ano, mes);
+
+      if (prep.avisos?.length) {
+        UI().closeModal();
+        const ok = await UI().confirmModal({
+          title: "Gerar PDF mesmo assim?",
+          body: `<div class="alert alert-warn">${prep.avisos.map((a) => `<p style="margin:0 0 8px">${UI().esc(a)}</p>`).join("")}</div>
+            <p class="muted" style="margin:0">Você pode continuar — o PDF não será bloqueado.</p>`,
+          okText: "Continuar e gerar PDF",
+          cancelText: "Cancelar",
+        });
+        if (!ok) return;
+        const res = PDF.imprimir(prep.titulo, prep.html);
+        if (!res.ok) return UI().toast(res.erro);
+        UI().toast(prep.total ? "PDF aberto para impressão." : "PDF gerado (sem escalas neste período).");
         return;
       }
+
+      const res = PDF.imprimir(prep.titulo, prep.html);
+      if (!res.ok) return UI().toast(res.erro);
       UI().closeModal();
+      UI().toast("PDF aberto para impressão.");
     });
   }
 
@@ -1970,6 +1985,28 @@ window.DiaconiaViewsLider = (() => {
       .join("");
   }
 
+  function optionsSlotsCobertura(state, slots) {
+    const grupos = new Map();
+    for (const s of slots) {
+      const key = `${s.data}|${s.diaconoId}`;
+      if (!grupos.has(key)) grupos.set(key, { ...s, funcoes: [] });
+      grupos.get(key).funcoes.push(s);
+    }
+    return [...grupos.values()]
+      .map((s) => {
+        const nomes = s.funcoes.map((f) => UI().nomeFuncao(state, f.funcaoId)).join(", ");
+        const nome = UI().nomeDiacono(state, s.diaconoId);
+        const extra =
+          s.funcoes.length > 1
+            ? ` · ${s.funcoes.length} funções: ${nomes}`
+            : ` · ${nomes}`;
+        return `<option value="${s.data}|${s.equipeId}|${s.funcaoId}|${s.diaconoId}">${UI().esc(
+          `${Cal().formatBR(s.data)} — ${nome}${extra}`
+        )}</option>`;
+      })
+      .join("");
+  }
+
   function trocas(app) {
     const { state } = ctx(app);
     const rows = [...(state.trocas || [])]
@@ -1983,7 +2020,7 @@ window.DiaconiaViewsLider = (() => {
           <td>${UI().esc(Cal().formatBR(t.data))}</td>
           <td>${badgeModalidade(t.modalidade)}</td>
           <td>${UI().esc(a)} ${seta} ${UI().esc(b)}</td>
-          <td>${UI().esc(UI().nomeFuncao(state, t.funcaoId))}</td>
+          <td>${UI().esc(UI().nomeFuncoesTroca(state, t))}</td>
           <td>${badgeTroca(t.status)}</td>
           <td class="toolbar">
             ${
@@ -2000,7 +2037,7 @@ window.DiaconiaViewsLider = (() => {
       <div class="topbar">
         <div>
           <h1>Troca / Cobrir</h1>
-          <p class="sub"><strong>Troca</strong> = permuta de funções. <strong>Cobrir</strong> = outra pessoa assume (mesma ou outra equipe) e quem saiu fica fora. Entre diáconos, vale no aceite — sem aprovação da liderança.</p>
+          <p class="sub"><strong>Troca</strong> = permuta de funções. <strong>Cobrir</strong> = outra pessoa assume todas as funções de quem sai naquele culto. Entre diáconos, vale no aceite — sem aprovação da liderança.</p>
         </div>
         <button class="btn btn-accent" id="btn-nova-troca">+ Nova troca/cobertura</button>
       </div>
@@ -2054,7 +2091,7 @@ window.DiaconiaViewsLider = (() => {
     });
   }
 
-  function formTrocaLider(app) {
+  function formTrocaLider(app, pref = {}) {
     const { state, ano, mes } = ctx(app);
     const slotsIniciais = slotsTrocaDoMes(state, ano, mes);
     if (!slotsIniciais.length) {
@@ -2065,14 +2102,16 @@ window.DiaconiaViewsLider = (() => {
     const mesesOpts = Cal()
       .MESES.map((n, i) => `<option value="${i + 1}" ${i + 1 === mes ? "selected" : ""}>${n}</option>`)
       .join("");
+    const modIni = pref.modalidade === "cobertura" ? "cobertura" : "troca";
+    const optsIni = optionsSlotsCobertura(state, slotsIniciais);
 
     UI().openModal(`
       <h2>Nova troca / cobertura</h2>
       <p class="muted" style="margin-top:-6px">A escala oficial é atualizada na hora. Quem cobre pode ser da mesma ou de outra equipe.</p>
       <p><strong>Tipo</strong></p>
       <div class="radio-list">
-        <label><input type="radio" name="t-mod" value="troca" checked/> <strong>Troca</strong> — permuta (se o outro já estiver escalado no dia, as funções são invertidas)</label>
-        <label><input type="radio" name="t-mod" value="cobertura"/> <strong>Cobrir</strong> — outra pessoa assume a função; quem saiu fica fora deste dia</label>
+        <label><input type="radio" name="t-mod" value="troca" ${modIni === "troca" ? "checked" : ""}/> <strong>Troca</strong> — permuta (se alguém tiver várias funções no culto, permutam todas)</label>
+        <label><input type="radio" name="t-mod" value="cobertura" ${modIni === "cobertura" ? "checked" : ""}/> <strong>Cobrir</strong> — outra pessoa assume todas as funções de quem sai neste dia</label>
       </div>
       <div class="toolbar" style="margin-bottom:12px">
         <label class="field" style="margin:0;flex:1">
@@ -2080,10 +2119,8 @@ window.DiaconiaViewsLider = (() => {
           <select class="select" id="t-mes">${mesesOpts}</select>
         </label>
       </div>
-      <label class="field"><span id="t-label-de">Quem sai / precisa de cobertura</span><select id="t-part" class="select">${optionsSlotsTroca(
-        state,
-        slotsIniciais
-      )}</select></label>
+      <label class="field"><span id="t-label-de">Quem sai / precisa de cobertura</span><select id="t-part" class="select">${optsIni}</select></label>
+      <div id="t-aviso-multi"></div>
       <label class="field"><span id="t-label-para">Quem entra / cobre</span><select id="t-com" class="select"></select></label>
       <p class="muted" id="t-dica" style="font-size:13px;min-height:1.4em"></p>
       <div class="modal-actions">
@@ -2095,6 +2132,7 @@ window.DiaconiaViewsLider = (() => {
     const m = document.getElementById("modal-root");
 
     const modalidade = () => m.querySelector('input[name="t-mod"]:checked')?.value || "troca";
+    let aplicouPref = false;
 
     const fillCom = () => {
       const part = m.querySelector("#t-part").value;
@@ -2109,13 +2147,18 @@ window.DiaconiaViewsLider = (() => {
       const outros = (state.diaconos || []).filter((d) => d.id !== deId && d.ativo !== false);
       com.innerHTML = outros
         .map((d) => {
-          const ja = funcaoDoDiaconoNaData(state, d.id, data);
-          const extra = ja ? ` — já em ${UI().nomeFuncao(state, ja.funcaoId)}` : " — livre neste dia";
+          const partes = Engine().participacoesNaData(state, d.id, data);
+          const extra = partes.length
+            ? ` — já em ${partes.map((p) => UI().nomeFuncao(state, p.funcaoId)).join(", ")}`
+            : " — livre neste dia";
           return `<option value="${d.id}">${UI().esc(d.nome)} (${UI().esc(UI().nomeEquipe(state, d.equipeId))})${UI().esc(
             extra
           )}</option>`;
         })
         .join("");
+      if (!aplicouPref && pref.paraDiaconoId && [...com.options].some((o) => o.value === pref.paraDiaconoId)) {
+        com.value = pref.paraDiaconoId;
+      }
       updateDica();
     };
 
@@ -2123,18 +2166,42 @@ window.DiaconiaViewsLider = (() => {
       const part = m.querySelector("#t-part").value;
       const paraId = m.querySelector("#t-com").value;
       const dica = m.querySelector("#t-dica");
+      const aviso = m.querySelector("#t-aviso-multi");
       const mod = modalidade();
       if (!part || !paraId) {
         dica.textContent = "";
+        if (aviso) aviso.innerHTML = "";
         return;
       }
-      const [data] = part.split("|");
+      const [data, , , deId] = part.split("|");
       const ja = funcaoDoDiaconoNaData(state, paraId, data);
       const nomeB = UI().nomeDiacono(state, paraId);
+      const nomeA = UI().nomeDiacono(state, deId);
+      const partesA = Engine().participacoesNaData(state, deId, data);
+      const partesB = Engine().participacoesNaData(state, paraId, data);
+      if (aviso) {
+        if (mod === "cobertura" && partesA.length > 1) {
+          const nomes = partesA.map((p) => UI().esc(UI().nomeFuncao(state, p.funcaoId))).join(", ");
+          aviso.innerHTML = `<div class="alert alert-warn"><strong>${UI().esc(nomeA)}</strong> está em <strong>${partesA.length} funções</strong> neste culto (${nomes}). Quem cobrir assume todas.</div>`;
+        } else if (mod === "troca" && (partesA.length > 1 || partesB.length > 1)) {
+          const nomesA = partesA.map((p) => UI().esc(UI().nomeFuncao(state, p.funcaoId))).join(", ") || "—";
+          const nomesB = partesB.length
+            ? partesB.map((p) => UI().esc(UI().nomeFuncao(state, p.funcaoId))).join(", ")
+            : "livre neste dia";
+          aviso.innerHTML = `<div class="alert alert-warn">Há várias funções neste culto. A troca permutará <strong>todas</strong>:<br>
+            ${UI().esc(nomeA)}: ${nomesA}<br>
+            ${UI().esc(nomeB)}: ${nomesB}</div>`;
+        } else {
+          aviso.innerHTML = "";
+        }
+      }
       if (mod === "cobertura") {
+        const todas = partesA.length > 1 ? " todas as funções" : " a função";
         dica.textContent = ja
-          ? `${nomeB} cobrirá a função e deixará a própria escala deste dia.`
-          : `${nomeB} (outra ou mesma equipe) cobrirá; quem saiu fica fora deste dia.`;
+          ? `${nomeB} cobrirá${todas} e deixará a própria escala deste dia.`
+          : `${nomeB} cobrirá${todas}; ${nomeA} fica fora deste dia.`;
+      } else if (partesA.length > 1 || partesB.length > 1) {
+        dica.textContent = `A troca permutará todas as funções deste culto entre ${nomeA} e ${nomeB}.`;
       } else if (ja) {
         dica.textContent = `${nomeB} já serve neste dia — as funções serão trocadas.`;
       } else {
@@ -2146,20 +2213,32 @@ window.DiaconiaViewsLider = (() => {
       const msel = +m.querySelector("#t-mes").value;
       const slots = slotsTrocaDoMes(state, ano, msel);
       const part = m.querySelector("#t-part");
-      part.innerHTML = optionsSlotsTroca(state, slots);
+      const prev = part.value;
+      part.innerHTML = optionsSlotsCobertura(state, slots);
+      if (!aplicouPref && pref.data && pref.deDiaconoId) {
+        const alvo = `${pref.data}|${pref.equipeId}|${pref.funcaoId}|${pref.deDiaconoId}`;
+        if ([...part.options].some((o) => o.value === alvo)) part.value = alvo;
+        else {
+          const mesmoDia = [...part.options].find((o) => o.value.startsWith(`${pref.data}|`) && o.value.endsWith(`|${pref.deDiaconoId}`));
+          if (mesmoDia) part.value = mesmoDia.value;
+        }
+      } else if (prev && [...part.options].some((o) => o.value === prev)) {
+        part.value = prev;
+      }
       if (!slots.length) {
         UI().toast("Não há atribuições neste mês.");
       }
       fillCom();
+      aplicouPref = true;
     };
 
-    m.querySelectorAll('input[name="t-mod"]').forEach((r) => r.addEventListener("change", updateDica));
+    m.querySelectorAll('input[name="t-mod"]').forEach((r) => r.addEventListener("change", fillSlots));
     m.querySelector("#t-mes").addEventListener("change", fillSlots);
     m.querySelector("#t-part").addEventListener("change", fillCom);
     m.querySelector("#t-com").addEventListener("change", updateDica);
-    fillCom();
+    fillSlots();
 
-    m.addEventListener("click", (e) => {
+    m.addEventListener("click", async (e) => {
       const act = e.target.closest("[data-act]")?.dataset.act;
       if (act === "cancel") return UI().closeModal();
       if (act !== "apply") return;
@@ -2167,23 +2246,51 @@ window.DiaconiaViewsLider = (() => {
       const paraDiaconoId = m.querySelector("#t-com").value;
       if (!part || !paraDiaconoId) return UI().toast("Selecione quem sai e quem entra/cobre.");
       const [data, equipeId, funcaoId, deDiaconoId] = part.split("|");
-      const res = window.DiaconiaSwaps.executarPeloLider(
-        state,
-        {
-          data,
-          equipeId,
-          funcaoId,
-          deDiaconoId,
-          paraDiaconoId,
-          modalidade: modalidade(),
-        },
-        ctx(app).sessao()
-      );
+      const payload = {
+        data,
+        equipeId,
+        funcaoId,
+        deDiaconoId,
+        paraDiaconoId,
+        modalidade: modalidade(),
+      };
+
+      if (payload.modalidade === "cobertura") {
+        const partesA = Engine().participacoesNaData(state, deDiaconoId, data);
+        const ok = await UI().confirmarCoberturaTodasFuncoes({
+          nomesFuncoes: partesA.map((p) => UI().nomeFuncao(state, p.funcaoId)),
+          dataBr: Cal().formatBR(data),
+          nomeQuemSai: UI().nomeDiacono(state, deDiaconoId),
+          nomeQuemCobre: UI().nomeDiacono(state, paraDiaconoId),
+          visao: "pedido",
+        });
+        if (!ok) {
+          formTrocaLider(app, payload);
+          return;
+        }
+      } else if (payload.modalidade === "troca") {
+        const partesA = Engine().participacoesNaData(state, deDiaconoId, data);
+        const partesB = Engine().participacoesNaData(state, paraDiaconoId, data);
+        const ok = await UI().confirmarTrocaTodasFuncoes({
+          nomesOrigem: partesA.map((p) => UI().nomeFuncao(state, p.funcaoId)),
+          nomesAlvo: partesB.map((p) => UI().nomeFuncao(state, p.funcaoId)),
+          dataBr: Cal().formatBR(data),
+          nomeQuemSai: UI().nomeDiacono(state, deDiaconoId),
+          nomeQuemEntra: UI().nomeDiacono(state, paraDiaconoId),
+          visao: "pedido",
+        });
+        if (!ok) {
+          formTrocaLider(app, payload);
+          return;
+        }
+      }
+
+      const res = window.DiaconiaSwaps.executarPeloLider(state, payload, ctx(app).sessao());
       if (!res.ok) return UI().toast(res.erro);
       app.save();
       UI().closeModal();
       app.render();
-      UI().toast(modalidade() === "cobertura" ? "Cobertura registrada." : "Troca registrada.");
+      UI().toast(payload.modalidade === "cobertura" ? "Cobertura registrada." : "Troca registrada.");
     });
   }
 
@@ -3564,7 +3671,7 @@ window.DiaconiaViewsLider = (() => {
     });
   }
 
-  /* ——— Relatos de erro (admin) ——— */
+  /* ——— Relatos de erro (bugs do sistema) ——— */
   function errosAdmin(app) {
     const { state } = ctx(app);
     const Err = window.DiaconiaErrors;
@@ -3600,7 +3707,7 @@ window.DiaconiaViewsLider = (() => {
       <div class="topbar">
         <div>
           <h1>Relatos de erro</h1>
-          <p class="sub">Problemas enviados pelos usuários — use para aperfeiçoar o sistema.</p>
+          <p class="sub">Bugs do portal relatados pelos usuários — ação que falhou ou mensagem de que não deu certo.</p>
         </div>
         <div class="toolbar">
           <button type="button" class="btn btn-ghost" id="btn-novo-relato-lider">+ Relatar erro</button>
@@ -3694,8 +3801,8 @@ window.DiaconiaViewsLider = (() => {
       .join("");
     UI().openModal(`
       <h2>Relatar erro</h2>
-      <p class="muted" style="margin-top:0">Registre um problema encontrado na gestão ou no uso do sistema.</p>
-      <label class="field"><span>Onde ocorreu?</span><select id="err-area" class="select">${areas}</select></label>
+      <p class="muted" style="margin-top:0">Bugs do portal: ação que não concluiu, botão que não responde ou mensagem de que não deu certo.</p>
+      <label class="field"><span>Onde no sistema?</span><select id="err-area" class="select">${areas}</select></label>
       <label class="field"><span>Título</span><input id="err-titulo" class="input" maxlength="120"/></label>
       <label class="field"><span>Descrição</span><textarea id="err-desc" class="textarea" rows="5"></textarea></label>
       <div class="modal-actions">
@@ -3789,6 +3896,10 @@ window.DiaconiaViewsLider = (() => {
     restricoes: { render: restricoes, bind: bindRestricoes },
     trocas: { render: trocas, bind: bindTrocas },
     comunicados: { render: comunicados, bind: bindComunicados },
+    ocorrencias: {
+      render: (app) => window.DiaconiaViewsDiacono.pages.ocorrencias.render(app),
+      bind: (app, root) => window.DiaconiaViewsDiacono.pages.ocorrencias.bind?.(app, root),
+    },
     usuarios: { render: usuarios, bind: bindUsuarios },
     historico: { render: historico, bind: bindHistorico },
     erros: { render: errosAdmin, bind: bindErrosAdmin },
