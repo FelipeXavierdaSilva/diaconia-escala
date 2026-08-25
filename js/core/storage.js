@@ -203,10 +203,15 @@ window.DiaconiaStorage = (() => {
       }
     }
 
-    // Equipes: nome só aparece ao diácono após a liderança definir
-    for (const eq of state.equipes || []) {
+    // Equipes: nome só aparece ao diácono após a liderança definir; cor de identificação
+    const coresEqPadrao = ["#0f4c5c", "#1d4e89", "#3d6b4f", "#6b3d5a", "#8a4a22", "#2f5d62"];
+    (state.equipes || []).forEach((eq, i) => {
       if (eq.nomeDefinido === undefined) eq.nomeDefinido = false;
-    }
+      const hex = String(eq.cor || "").trim();
+      if (!/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(hex)) {
+        eq.cor = coresEqPadrao[i % coresEqPadrao.length];
+      }
+    });
 
     // Casais: flag "não servir juntos na diaconia"
     for (const c of state.casais || []) {

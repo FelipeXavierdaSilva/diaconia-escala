@@ -1273,6 +1273,64 @@ table.data tbody tr.no-click {
   color: var(--danger);
 }
 
+.eq-mark {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  vertical-align: middle;
+}
+
+.panel-eq {
+  border-left: 4px solid var(--eq, var(--teal));
+}
+
+.eq-cor-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.eq-cor-row input[type="color"] {
+  width: 44px;
+  height: 32px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.eq-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.eq-swatch-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid rgba(0, 0, 0, 0.12);
+  padding: 0;
+  cursor: pointer;
+}
+
+.eq-swatch-btn.is-on {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.eq-lab {
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .badge-muted {
   background: #eef2f3;
   color: var(--muted);
@@ -1382,6 +1440,11 @@ table.data tbody tr.no-click {
 .cal-day.has-event:hover {
   transform: translateY(-1px);
   box-shadow: 0 6px 14px rgba(15, 76, 92, 0.1);
+}
+
+.cal-day.has-event.eq-day {
+  background: color-mix(in srgb, var(--eq, var(--teal)) 16%, #fff);
+  border-color: var(--eq, var(--teal-2));
 }
 
 .cal-day .n {

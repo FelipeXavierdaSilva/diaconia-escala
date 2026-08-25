@@ -48,7 +48,11 @@ window.DiaconiaEscalaModal = (() => {
           <p class="muted" style="margin:0">${UI().esc(Cal().diaSemana(data))} · ${UI().esc(esc.nome)} · ${UI().esc(esc.horario)}${isLider ? ` · ${UI().badgeStatus(st)}` : ""}</p>
           ${
             isLider || nomeEqResp
-              ? `<p style="margin:8px 0 0"><strong>Equipe do dia:</strong> ${UI().esc(nomeEqResp || "—")}</p>`
+              ? `<p style="margin:8px 0 0"><strong>Equipe do dia:</strong> ${
+                  isLider && eqResp
+                    ? UI().marcaEquipe(state, eqResp, nomeEqResp || "—")
+                    : UI().esc(nomeEqResp || "—")
+                }</p>`
               : ""
           }
             ${
@@ -119,9 +123,13 @@ window.DiaconiaEscalaModal = (() => {
         const eq = state.equipes.find((e) => e.id === eqId);
         const stEq = Engine().statusEquipe(esc, eqId, state);
         html += `
-        <div class="equipe-block">
+        <div class="equipe-block"${
+          isLider ? ` style="border-left:4px solid ${UI().corEquipe(state, eqId)};padding-left:10px"` : ""
+        }>
           <div class="equipe-head">
-            <h3>${UI().esc(eq?.nome || eqId)} ${isLider ? UI().badgeStatus(stEq === "completa" ? "completa" : stEq === "vazia" ? "rascunho" : "em_edicao") : ""}</h3>
+            <h3>${
+              isLider ? UI().marcaEquipe(state, eqId, eq?.nome || eqId) : UI().esc(eq?.nome || eqId)
+            } ${isLider ? UI().badgeStatus(stEq === "completa" ? "completa" : stEq === "vazia" ? "rascunho" : "em_edicao") : ""}</h3>
             ${
               isLider
                 ? `<div class="toolbar">

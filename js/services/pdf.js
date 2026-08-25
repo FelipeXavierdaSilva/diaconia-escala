@@ -43,25 +43,46 @@ window.DiaconiaPDF = (() => {
     if (ids.length) {
       return ids.map((id) => nomeDiacono(state, id)).filter(Boolean).join(", ");
     }
-    // fallback: usuários líderes vinculados à equipe via diáconos
     return "";
   }
 
+  /** Cores estáveis por equipe (impressão / PDF). */
+  const CORES_EQUIPE = ["#0f4c5c", "#1d4e89", "#3d6b4f", "#6b3d5a", "#8a4a22", "#2f5d62"];
+
+  function corEquipe(state, eqId) {
+    if (typeof window.DiaconiaUI?.corEquipe === "function") {
+      return window.DiaconiaUI.corEquipe(state, eqId);
+    }
+    const eqs = state.equipes || [];
+    const eq = eqs.find((e) => e.id === eqId);
+    const hex = String(eq?.cor || "").trim();
+    if (/^#[0-9a-fA-F]{6}$/.test(hex)) return hex.toLowerCase();
+    const idx = eqs.findIndex((e) => e.id === eqId);
+    return CORES_EQUIPE[(idx < 0 ? 0 : idx) % CORES_EQUIPE.length];
+  }
+
+  function funcoesIdsPdf(state, escala) {
+    if (typeof Engine().funcoesDaEscala === "function") {
+      return Engine().funcoesDaEscala(state, escala);
+    }
+    return escala.funcoesIds || state.funcoesPadraoCulto || [];
+  }
+
   /**
-   * Card compacto de uma escala (Função | Responsáveis — sem Horário).
+   * Card de uma escala (Função | Responsáveis — sem Horário).
    * @param {{ compact?: boolean }} opts
    */
   function htmlEscalaCard(state, escala, opts = {}) {
-    const compact = opts.compact !== false;
     const CalX = Cal();
     const incompleta = escalaIncompleta(state, escala);
     const eqs = escala.equipesIds || [];
     const eqId = eqs[0];
     const eq = eqId ? state.equipes.find((e) => e.id === eqId) : null;
     const lideres = eqId ? lideresDaEquipe(state, eqId) : "";
+    const cor = corEquipe(state, eqId);
 
     let html = `<article class="esc-card${incompleta ? " is-incompleta" : ""}">
-      <header class="esc-card-head">
+      <header class="esc-card-head" style="background:${cor}">
         <div class="esc-card-date">${CalX.formatBR(escala.data)} · ${CalX.diaSemana(escala.data)}</div>
         <div class="esc-card-meta">${escala.nome || "Culto"}${eq?.nome ? ` · ${eq.nome}` : ""}${
       incompleta ? ` · <em>Incompleta</em>` : ""
@@ -74,26 +95,27 @@ window.DiaconiaPDF = (() => {
       return html;
     }
 
+    const funcoesIds = funcoesIdsPdf(state, escala);
     for (const eid of eqs) {
       const eObj = state.equipes.find((e) => e.id === eid);
+      const corEq = corEquipe(state, eid);
       if (eqs.length > 1) {
-        html += `<div class="esc-eq-nome">${eObj?.nome || eid}</div>`;
+        html += `<div class="esc-eq-nome" style="background:${corEq};color:#fff">${eObj?.nome || eid}</div>`;
       }
       html += `<table class="esc-table"><thead><tr><th>Função</th><th>Responsáveis</th></tr></thead><tbody>`;
-      for (const fid of escala.funcoesIds || state.funcoesPadraoCulto || []) {
+      for (const fid of funcoesIds) {
         const f = Engine().getFuncao(state, fid);
         if (f && f.ativo === false) continue;
         const ids = escala.atribuicoes?.[eid]?.[fid] || [];
         const nomes = ids.map((id) => nomeDiacono(state, id)).join(", ") || "—";
         const vazio = !ids.length;
-        const emoji = compact ? "" : f?.emoji ? `${f.emoji} ` : "";
+        const emoji = f?.emoji ? `<span class="fn-ico">${f.emoji}</span>` : "";
         html += `<tr class="${vazio ? "row-vazio" : ""}"><td>${emoji}${f?.nome || fid}</td><td>${nomes}</td></tr>`;
       }
       html += `</tbody></table>`;
     }
 
-    html += `</article>`;
-    return html;
+    return html + `</article>`;
   }
 
   /** @deprecated use htmlEscalaCard — mantido para compat de chamadas antigas */
@@ -230,8 +252,13 @@ window.DiaconiaPDF = (() => {
   function estilosImpressao({ landscape } = {}) {
     return `
       * { box-sizing: border-box; }
+      html, body, .esc-card, .esc-card-head, .esc-eq-nome, .esc-table th, .esc-table td {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+        color-adjust: exact;
+      }
       body {
-        font-family: "Segoe UI", system-ui, sans-serif;
+        font-family: "Segoe UI", "Segoe UI Emoji", "Noto Color Emoji", system-ui, sans-serif;
         margin: 0;
         padding: 10mm;
         color: #1a2a2e;
@@ -270,12 +297,15 @@ window.DiaconiaPDF = (() => {
         page-break-inside: avoid;
         break-inside: avoid;
       }
+      .esc-card.is-incompleta {
+        border-color: #c47b16;
+        box-shadow: inset 0 0 0 1.5px #c47b16;
+      }
       .esc-card-head {
         background: #0f4c5c;
         color: #fff;
         padding: 5px 7px;
       }
-      .esc-card.is-incompleta .esc-card-head { background: #8a5a2b; }
       .esc-card-date { font-weight: 700; font-size: 11px; }
       .esc-card-meta { font-size: 9px; opacity: 0.92; margin-top: 1px; }
       .esc-card-meta em { font-style: normal; color: #ffd8a8; }
@@ -284,7 +314,15 @@ window.DiaconiaPDF = (() => {
         font-weight: 700;
         font-size: 9px;
         padding: 3px 7px;
-        background: #e8eef0;
+        background: #0f4c5c;
+        color: #fff;
+      }
+      .fn-ico {
+        display: inline-block;
+        min-width: 1.15em;
+        margin-right: 4px;
+        font-size: 11px;
+        line-height: 1;
       }
       .esc-table {
         width: 100%;
@@ -306,7 +344,7 @@ window.DiaconiaPDF = (() => {
         color: #445;
       }
       .esc-table th:first-child,
-      .esc-table td:first-child { width: 38%; }
+      .esc-table td:first-child { width: 42%; }
       .esc-table tr:nth-child(even) td { background: #f7fafb; }
       .esc-table tr.row-vazio td { background: #fff8e8; }
       .esc-empty { padding: 8px; margin: 0; font-style: italic; }
@@ -319,6 +357,10 @@ window.DiaconiaPDF = (() => {
         body { padding: 0; }
         .esc-card { break-inside: avoid; page-break-inside: avoid; }
         .mes-bloco { break-inside: avoid; page-break-inside: avoid; }
+        .esc-card-head, .esc-eq-nome, .esc-table th, .esc-table tr.row-vazio td {
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
       }
     `.trim();
   }

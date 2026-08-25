@@ -292,6 +292,49 @@ window.DiaconiaUI = (() => {
     return nomeEquipe(state, id);
   }
 
+  const CORES_EQUIPE_PADRAO = ["#0f4c5c", "#1d4e89", "#3d6b4f", "#6b3d5a", "#8a4a22", "#2f5d62"];
+
+  function corEquipePadrao(idx) {
+    const i = Number(idx);
+    const n = CORES_EQUIPE_PADRAO.length;
+    return CORES_EQUIPE_PADRAO[((Number.isFinite(i) ? i : 0) % n + n) % n];
+  }
+
+  function normalizarCorHex(v, fallback = "#0f4c5c") {
+    const s = String(v || "").trim();
+    if (/^#[0-9a-fA-F]{6}$/.test(s)) return `#${s.slice(1).toLowerCase()}`;
+    if (/^#[0-9a-fA-F]{3}$/.test(s)) {
+      const a = s.slice(1).toLowerCase();
+      return `#${a[0]}${a[0]}${a[1]}${a[1]}${a[2]}${a[2]}`;
+    }
+    return fallback;
+  }
+
+  function corEquipe(state, id) {
+    const eqs = state?.equipes || [];
+    const idx = eqs.findIndex((e) => e.id === id);
+    const fallback = corEquipePadrao(idx < 0 ? 0 : idx);
+    if (idx < 0) return fallback;
+    return normalizarCorHex(eqs[idx].cor, fallback);
+  }
+
+  function corTextoSobre(hex) {
+    const h = normalizarCorHex(hex);
+    const r = parseInt(h.slice(1, 3), 16);
+    const g = parseInt(h.slice(3, 5), 16);
+    const b = parseInt(h.slice(5, 7), 16);
+    const luma = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return luma > 0.62 ? "#1a2a2e" : "#ffffff";
+  }
+
+  /** Selo colorido da equipe (painel da liderança). */
+  function marcaEquipe(state, id, texto) {
+    const cor = corEquipe(state, id);
+    const fg = corTextoSobre(cor);
+    const label = texto != null ? texto : nomeEquipe(state, id);
+    return `<span class="eq-mark" style="background:${cor};color:${fg}">${esc(label)}</span>`;
+  }
+
   function nomeFuncao(state, id) {
     const f = window.DiaconiaEngine.getFuncao(state, id);
     return f ? `${f.emoji} ${f.nome}` : id;
@@ -905,6 +948,12 @@ window.DiaconiaUI = (() => {
     nomeEquipe,
     equipeNomeDefinido,
     nomeEquipePublico,
+    CORES_EQUIPE_PADRAO,
+    corEquipePadrao,
+    normalizarCorHex,
+    corEquipe,
+    corTextoSobre,
+    marcaEquipe,
     nomeFuncao,
     listaFuncoesTroca,
     nomeFuncoesTroca,

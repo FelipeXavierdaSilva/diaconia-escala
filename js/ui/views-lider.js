@@ -239,8 +239,6 @@ window.DiaconiaViewsLider = (() => {
       .map((esc) => {
         const st = Engine().statusEscala(esc, state);
         const eqId = (esc.equipesIds || [])[0];
-        const sEq = eqId ? Engine().statusEquipe(esc, eqId, state) : "vazia";
-        const tom = sEq === "completa" ? "ok" : sEq === "vazia" ? "muted" : "warn";
         const eqNome = eqId ? UI().nomeEquipe(state, eqId) : "—";
         const hintProb =
           st === "incompleta" && esc.problemas?.[0]?.mensagem
@@ -250,7 +248,7 @@ window.DiaconiaViewsLider = (() => {
           ${UI().bulkTd(esc.data, "escalas-lista")}
           <td>${UI().esc(Cal().formatBRCurto(esc.data))}<div class="muted" style="font-size:12px">${UI().esc(Cal().diaSemana(esc.data))}</div></td>
           <td>${UI().esc(esc.nome)}</td>
-          <td><span class="badge badge-${tom}">${UI().esc(eqNome)}</span></td>
+          <td>${eqId ? UI().marcaEquipe(state, eqId, eqNome) : `<span class="muted">—</span>`}</td>
           <td>${UI().badgeStatus(st)}${hintProb}</td>
           <td>
             <div class="toolbar">
@@ -271,11 +269,15 @@ window.DiaconiaViewsLider = (() => {
         if (!esc) return `<div class="cal-day"><span class="n">${day}</span></div>`;
         const st = Engine().statusEscala(esc, state);
         const info = Engine().labelStatus(st);
-        const eqNome = esc.equipesIds?.[0] ? UI().nomeEquipe(state, esc.equipesIds[0]) : "";
-        return `<div class="cal-day has-event" data-data="${iso}" title="${UI().esc(esc.nome + (eqNome ? " · " + eqNome : ""))}">
+        const eqIdCal = esc.equipesIds?.[0];
+        const eqNome = eqIdCal ? UI().nomeEquipe(state, eqIdCal) : "";
+        const corEq = eqIdCal ? UI().corEquipe(state, eqIdCal) : "";
+        return `<div class="cal-day has-event eq-day" data-data="${iso}" title="${UI().esc(esc.nome + (eqNome ? " · " + eqNome : ""))}"${
+          corEq ? ` style="border-color:${corEq};--eq:${corEq}"` : ""
+        }>
           <span class="n">${day}</span>
-          <span class="mark" style="background:var(--${info.tom === "ok" ? "ok" : info.tom === "warn" ? "warn" : info.tom === "danger" ? "danger" : "muted"})"></span>
-          ${eqNome ? `<span style="font-size:9px;font-weight:700;color:var(--teal);line-height:1">${UI().esc(eqNome.replace("Equipe ", "E"))}</span>` : ""}
+          <span class="mark" style="background:${corEq || (info.tom === "ok" ? "var(--ok)" : info.tom === "warn" ? "var(--warn)" : info.tom === "danger" ? "var(--danger)" : "var(--muted)")}"></span>
+          ${eqNome ? `<span class="eq-lab" style="color:${corEq || "var(--teal)"}">${UI().esc(eqNome.replace("Equipe ", "E"))}</span>` : ""}
         </div>`;
       })
       .join("");
@@ -760,7 +762,7 @@ window.DiaconiaViewsLider = (() => {
         ${UI().bulkTd(d.id, "diaconos")}
         <td>${UI().badgeAtivo(d.ativo)}</td>
         <td>${UI().esc(d.nome)}${parceiro ? `<div class="muted" style="font-size:12px">💑 ${UI().esc(parceiro)}</div>` : ""}</td>
-        <td>${UI().esc(UI().nomeEquipe(state, d.equipeId))}</td>
+        <td>${d.equipeId ? UI().marcaEquipe(state, d.equipeId) : `<span class="muted">—</span>`}</td>
         <td>${ministerio ? UI().esc(ministerio) : `<span class="muted">—</span>`}</td>
         <td>${diaconato ? UI().esc(diaconato) : `<span class="muted">—</span>`}</td>
         <td style="font-size:12px">${familia}</td>
@@ -1064,6 +1066,99 @@ window.DiaconiaViewsLider = (() => {
   }
 
   /* ——— Equipes ——— */
+  function formEquipe(app, equipe = null) {
+    const { state } = ctx(app);
+    const corAtual = equipe
+      ? UI().corEquipe(state, equipe.id)
+      : UI().corEquipePadrao(state.equipes.length);
+    const paleta = UI().CORES_EQUIPE_PADRAO || [];
+    const swatches = paleta
+      .map(
+        (c) =>
+          `<button type="button" class="eq-swatch-btn${c.toLowerCase() === corAtual.toLowerCase() ? " is-on" : ""}" data-cor="${c}" style="background:${c}" title="${c}" aria-label="Cor ${c}"></button>`
+      )
+      .join("");
+
+    UI().openModal(`
+      <h2>${equipe ? "Editar equipe" : "Nova equipe"}</h2>
+      <label class="field"><span>Nome</span>
+        <input id="eq-nome" class="input" value="${UI().esc(equipe?.nome || "")}" placeholder="Ex.: Equipe 01"/>
+      </label>
+      <label class="field field-check">
+        <input type="checkbox" id="eq-publico" ${equipe?.nomeDefinido ? "checked" : !equipe ? "checked" : ""}/>
+        <span>Mostrar este nome aos diáconos</span>
+      </label>
+      <label class="field"><span>Cor de identificação</span>
+        <div class="eq-cor-row">
+          <input type="color" id="eq-cor" value="${UI().esc(corAtual)}" aria-label="Escolher cor"/>
+          <span class="eq-cor-preview eq-mark" id="eq-cor-preview" style="background:${corAtual};color:${UI().corTextoSobre(corAtual)}">Prévia</span>
+        </div>
+      </label>
+      <div class="eq-swatches">${swatches}</div>
+      <p class="muted" style="font-size:12px;margin-top:8px">A cor identifica a equipe no painel da liderança e nos PDFs. O painel do diácono não muda.</p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" data-act="cancel">Cancelar</button>
+        <button type="button" class="btn btn-accent" data-act="save">Salvar</button>
+      </div>
+    `);
+
+    const m = document.getElementById("modal-root");
+    const corInput = m.querySelector("#eq-cor");
+    const preview = m.querySelector("#eq-cor-preview");
+    const syncPreview = (hex) => {
+      const c = UI().normalizarCorHex(hex, corAtual);
+      if (corInput) corInput.value = c;
+      if (preview) {
+        preview.style.background = c;
+        preview.style.color = UI().corTextoSobre(c);
+      }
+      m.querySelectorAll(".eq-swatch-btn").forEach((b) => {
+        b.classList.toggle("is-on", b.dataset.cor.toLowerCase() === c.toLowerCase());
+      });
+    };
+    corInput?.addEventListener("input", () => syncPreview(corInput.value));
+    m.querySelectorAll(".eq-swatch-btn").forEach((btn) => {
+      btn.addEventListener("click", () => syncPreview(btn.dataset.cor));
+    });
+    m.addEventListener("click", (e) => {
+      const act = e.target.closest("[data-act]")?.dataset.act;
+      if (act === "cancel") return UI().closeModal();
+      if (act !== "save") return;
+      const nome = String(m.querySelector("#eq-nome")?.value || "").trim();
+      if (!nome) return UI().toast("Informe o nome da equipe.");
+      const cor = UI().normalizarCorHex(m.querySelector("#eq-cor")?.value, corAtual);
+      const publico = !!m.querySelector("#eq-publico")?.checked;
+      if (equipe) {
+        equipe.nome = nome;
+        equipe.cor = cor;
+        equipe.nomeDefinido = publico;
+        window.DiaconiaHistory.add(state, {
+          tipo: "equipe",
+          mensagem: `Equipe ${nome} atualizada.`,
+          usuarioId: ctx(app).sessao()?.usuarioId,
+        });
+        UI().toast("Equipe atualizada.");
+      } else {
+        state.equipes.push({
+          id: Engine().uid("eq"),
+          nome,
+          nomeDefinido: publico,
+          ativa: true,
+          cor,
+        });
+        window.DiaconiaHistory.add(state, {
+          tipo: "equipe",
+          mensagem: `Equipe ${nome} criada.`,
+          usuarioId: ctx(app).sessao()?.usuarioId,
+        });
+        UI().toast("Equipe criada.");
+      }
+      UI().closeModal();
+      app.save();
+      app.render();
+    });
+  }
+
   function equipes(app) {
     const { state } = ctx(app);
     const cards = state.equipes
@@ -1073,15 +1168,16 @@ window.DiaconiaViewsLider = (() => {
           typeof Engine().diagnosticoCasaisEquipe === "function"
             ? Engine().diagnosticoCasaisEquipe(state, eq.id)
             : null;
-        return `<div class="panel">
+        const cor = UI().corEquipe(state, eq.id);
+        return `<div class="panel panel-eq" style="--eq:${cor};border-left-color:${cor}">
           <div class="panel-head">
-            <h2>${UI().esc(eq.nome)}${
+            <h2>${UI().marcaEquipe(state, eq.id, eq.nome)}${
               eq.nomeDefinido
                 ? ""
                 : ` <span class="badge badge-warn" title="O diácono ainda não vê este nome">Nome interno</span>`
             }</h2>
             <div class="toolbar">
-              ${UI().btnIcon({ icon: "pencil", label: "Definir / editar nome", variant: "ghost", attrs: { "data-act": "rename", "data-id": eq.id } })}
+              ${UI().btnIcon({ icon: "pencil", label: "Editar equipe", variant: "ghost", attrs: { "data-act": "rename", "data-id": eq.id } })}
               ${UI().btnIcon({ icon: "trash", label: "Remover", variant: "danger", attrs: { "data-act": "remove", "data-id": eq.id } })}
             </div>
           </div>
@@ -1109,7 +1205,7 @@ window.DiaconiaViewsLider = (() => {
 
     return `
       <div class="topbar">
-        <div><h1>Equipes</h1><p class="sub">Defina o nome da equipe para que apareça aos diáconos. Até lá, o nome fica só interno.</p></div>
+        <div><h1>Equipes</h1><p class="sub">Nome, cor de identificação (painel da liderança e PDF) e membros. O painel do diácono só mostra o nome quando você definir.</p></div>
         <button class="btn btn-accent" id="btn-add-eq">+ Adicionar equipe</button>
       </div>
       <div class="grid grid-2">${cards}</div>`;
@@ -1117,33 +1213,11 @@ window.DiaconiaViewsLider = (() => {
 
   function bindEquipes(app, root) {
     const { state } = ctx(app);
-    root.querySelector("#btn-add-eq")?.addEventListener("click", () => {
-      const nome = prompt("Nome da equipe (visível aos diáconos):");
-      if (!nome || !nome.trim()) return;
-      state.equipes.push({
-        id: Engine().uid("eq"),
-        nome: nome.trim(),
-        nomeDefinido: true,
-        ativa: true,
-      });
-      window.DiaconiaHistory.add(state, {
-        tipo: "equipe",
-        mensagem: `Equipe ${nome.trim()} criada.`,
-        usuarioId: ctx(app).sessao()?.usuarioId,
-      });
-      app.save();
-      app.render();
-    });
+    root.querySelector("#btn-add-eq")?.addEventListener("click", () => formEquipe(app, null));
     root.querySelectorAll('[data-act="rename"]').forEach((btn) => {
       btn.addEventListener("click", () => {
         const eq = state.equipes.find((e) => e.id === btn.dataset.id);
-        const nome = prompt("Nome da equipe (visível aos diáconos):", eq.nome || "");
-        if (!nome || !nome.trim()) return;
-        eq.nome = nome.trim();
-        eq.nomeDefinido = true;
-        app.save();
-        app.render();
-        UI().toast("Nome da equipe definido. Agora aparece para os diáconos.");
+        if (eq) formEquipe(app, eq);
       });
     });
     root.querySelectorAll('[data-act="remove"]').forEach((btn) => {

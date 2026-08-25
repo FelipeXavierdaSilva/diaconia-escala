@@ -198,8 +198,8 @@ window.DiaconiaSeed = (() => {
   ];
 
   const equipes = [
-    { id: "eq01", nome: "Equipe 01", nomeDefinido: false, ativa: true },
-    { id: "eq02", nome: "Equipe 02", nomeDefinido: false, ativa: true },
+    { id: "eq01", nome: "Equipe 01", nomeDefinido: false, ativa: true, cor: "#0f4c5c" },
+    { id: "eq02", nome: "Equipe 02", nomeDefinido: false, ativa: true, cor: "#1d4e89" },
   ];
 
   /** Ministérios da igreja (horários ajudam a gerar a escala da diaconia). */
