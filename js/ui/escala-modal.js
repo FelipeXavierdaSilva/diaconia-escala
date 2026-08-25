@@ -216,7 +216,7 @@ window.DiaconiaEscalaModal = (() => {
           });
           if (!ok) return;
         }
-        const res = PDF.imprimir(prep.titulo, prep.html);
+        const res = PDF.imprimir(prep.titulo, prep.html, { landscape: prep.landscape });
         if (res?.ok === false) UI().toast(res.erro || "Não foi possível gerar o PDF.");
         else UI().toast("PDF aberto para impressão.");
         return;

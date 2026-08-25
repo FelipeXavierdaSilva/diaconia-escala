@@ -1,6 +1,6 @@
 /**
  * Geração de PDF via janela de impressão (sem dependências).
- * Inclui escalas cadastradas — mesmo incompletas (com aviso na UI).
+ * Layout mensal compacto (grade, paisagem) — sem coluna Horário.
  */
 window.DiaconiaPDF = (() => {
   const Cal = () => window.DiaconiaCalendar;
@@ -28,7 +28,7 @@ window.DiaconiaPDF = (() => {
       for (const fid of funcoes) {
         const f = Engine().getFuncao(state, fid);
         if (f && f.ativo === false) continue;
-        const qtd = f?.qtdPorEquipe || 1;
+        const qtd = Engine().qtdFuncaoNaEscala?.(state, esc, fid) ?? f?.qtdPorEquipe ?? 1;
         const ids = esc.atribuicoes?.[eqId]?.[fid] || [];
         if (ids.length < qtd) return true;
       }
@@ -36,65 +36,109 @@ window.DiaconiaPDF = (() => {
     return false;
   }
 
-  function htmlEscala(state, escala) {
+  function lideresDaEquipe(state, eqId) {
+    const eq = state.equipes.find((e) => e.id === eqId);
+    if (!eq) return "";
+    const ids = eq.lideresIds || eq.liderIds || [];
+    if (ids.length) {
+      return ids.map((id) => nomeDiacono(state, id)).filter(Boolean).join(", ");
+    }
+    // fallback: usuários líderes vinculados à equipe via diáconos
+    return "";
+  }
+
+  /**
+   * Card compacto de uma escala (Função | Responsáveis — sem Horário).
+   * @param {{ compact?: boolean }} opts
+   */
+  function htmlEscalaCard(state, escala, opts = {}) {
+    const compact = opts.compact !== false;
     const CalX = Cal();
     const incompleta = escalaIncompleta(state, escala);
-    const st = Engine().statusEscala?.(escala, state);
-    const labelSt = Engine().labelStatus?.(st)?.texto || st || "";
-
-    let html = `<h1>Escala — ${CalX.formatBR(escala.data)}</h1>
-      <p><strong>${escala.nome || "Culto"}</strong> · ${CalX.diaSemana(escala.data)} · ${escala.horario || ""}`;
-    if (incompleta) {
-      html += ` · <em style="color:#a15c00">Incompleta${labelSt ? ` (${labelSt})` : ""}</em>`;
-    }
-    html += `</p>`;
-
     const eqs = escala.equipesIds || [];
+    const eqId = eqs[0];
+    const eq = eqId ? state.equipes.find((e) => e.id === eqId) : null;
+    const lideres = eqId ? lideresDaEquipe(state, eqId) : "";
+
+    let html = `<article class="esc-card${incompleta ? " is-incompleta" : ""}">
+      <header class="esc-card-head">
+        <div class="esc-card-date">${CalX.formatBR(escala.data)} · ${CalX.diaSemana(escala.data)}</div>
+        <div class="esc-card-meta">${escala.nome || "Culto"}${eq?.nome ? ` · ${eq.nome}` : ""}${
+      incompleta ? ` · <em>Incompleta</em>` : ""
+    }</div>
+        ${lideres ? `<div class="esc-card-lideres">Líderes: ${lideres}</div>` : ""}
+      </header>`;
+
     if (!eqs.length) {
-      html += `<p><em>Sem equipe definida neste dia.</em></p>`;
+      html += `<p class="esc-empty">Sem equipe definida.</p></article>`;
       return html;
     }
 
-    for (const eqId of eqs) {
-      const eq = state.equipes.find((e) => e.id === eqId);
-      html += `<h2>${eq?.nome || eqId}</h2><table><thead><tr><th>Função</th><th>Horário</th><th>Responsáveis</th></tr></thead><tbody>`;
+    for (const eid of eqs) {
+      const eObj = state.equipes.find((e) => e.id === eid);
+      if (eqs.length > 1) {
+        html += `<div class="esc-eq-nome">${eObj?.nome || eid}</div>`;
+      }
+      html += `<table class="esc-table"><thead><tr><th>Função</th><th>Responsáveis</th></tr></thead><tbody>`;
       for (const fid of escala.funcoesIds || state.funcoesPadraoCulto || []) {
         const f = Engine().getFuncao(state, fid);
         if (f && f.ativo === false) continue;
-        const ids = escala.atribuicoes?.[eqId]?.[fid] || [];
+        const ids = escala.atribuicoes?.[eid]?.[fid] || [];
         const nomes = ids.map((id) => nomeDiacono(state, id)).join(", ") || "—";
         const vazio = !ids.length;
-        html += `<tr${vazio ? ' style="background:#fff8e8"' : ""}><td>${f?.emoji || ""} ${f?.nome || fid}</td><td>${f?.horario || ""}</td><td>${nomes}</td></tr>`;
+        const emoji = compact ? "" : f?.emoji ? `${f.emoji} ` : "";
+        html += `<tr class="${vazio ? "row-vazio" : ""}"><td>${emoji}${f?.nome || fid}</td><td>${nomes}</td></tr>`;
       }
       html += `</tbody></table>`;
     }
 
-    if (escala.problemas?.length) {
-      html += `<p style="font-size:12px;color:#a15c00"><strong>Pendências:</strong> ${escala.problemas
-        .map((p) => p.mensagem)
-        .join(" · ")}</p>`;
-    }
-
+    html += `</article>`;
     return html;
   }
 
-  function prepararLista(state, lista, titulo) {
+  /** @deprecated use htmlEscalaCard — mantido para compat de chamadas antigas */
+  function htmlEscala(state, escala) {
+    return htmlEscalaCard(state, escala, { compact: false });
+  }
+
+  function colunasGrade(qtd) {
+    if (qtd <= 1) return 1;
+    if (qtd === 2) return 2;
+    if (qtd <= 4) return 2;
+    return 3;
+  }
+
+  function prepararLista(state, lista, titulo, opts = {}) {
     const incompletas = lista.filter((e) => escalaIncompleta(state, e));
-    let html = `<h1>${titulo}</h1>`;
+    const grade = opts.grade !== false && lista.length > 1;
+    const cols = colunasGrade(lista.length);
+
+    let html = `<header class="doc-head"><h1>${titulo}</h1>`;
+    if (lista.length && incompletas.length) {
+      html += `<p class="doc-aviso"><strong>Atenção:</strong> ${incompletas.length} de ${lista.length} escala(s) incompleta(s) — vagas em aberto aparecem como “—”.</p>`;
+    }
+    html += `</header>`;
+
     if (!lista.length) {
       html += `<p>Nenhuma escala cadastrada neste período.</p>`;
+    } else if (grade) {
+      html += `<div class="esc-grid cols-${cols}">`;
+      for (const esc of lista) html += htmlEscalaCard(state, esc, { compact: true });
+      html += `</div>`;
     } else {
-      if (incompletas.length) {
-        html += `<p style="font-size:13px;color:#a15c00"><strong>Atenção:</strong> ${incompletas.length} de ${lista.length} escala(s) incompleta(s) — vagas em aberto aparecem como “—”.</p>`;
+      for (const esc of lista) {
+        html += `<div class="esc-folha">${htmlEscalaCard(state, esc, { compact: false })}</div>`;
       }
-      for (const esc of lista) html += htmlEscala(state, esc) + "<hr/>";
     }
+
     return {
       titulo,
       html,
       total: lista.length,
       incompletas: incompletas.length,
       avisos: montarAvisos(lista.length, incompletas.length),
+      landscape: grade && lista.length >= 2,
+      grade,
     };
   }
 
@@ -112,13 +156,50 @@ window.DiaconiaPDF = (() => {
 
   function prepararMes(state, ano, mes) {
     const lista = escalasDoMes(state, ano, mes);
-    return prepararLista(state, lista, `Escala mensal — ${Cal().nomeMes(mes)} ${ano}`);
+    return prepararLista(state, lista, `Escala do diaconato — ${Cal().nomeMes(mes)} ${ano}`, {
+      grade: true,
+    });
   }
 
   function prepararTudo(state) {
     const datas = Object.keys(state.escalas || {}).sort();
     const lista = datas.map((d) => state.escalas[d]).filter(Boolean);
-    return prepararLista(state, lista, "Escala completa");
+    // “Tudo” pode ser longo: agrupa por mês em grades
+    const porMes = new Map();
+    for (const esc of lista) {
+      const [y, m] = String(esc.data).split("-");
+      const key = `${y}-${m}`;
+      if (!porMes.has(key)) porMes.set(key, []);
+      porMes.get(key).push(esc);
+    }
+    const incompletas = lista.filter((e) => escalaIncompleta(state, e));
+    let html = `<header class="doc-head"><h1>Escala completa</h1>`;
+    if (incompletas.length) {
+      html += `<p class="doc-aviso"><strong>Atenção:</strong> ${incompletas.length} de ${lista.length} escala(s) incompleta(s).</p>`;
+    }
+    html += `</header>`;
+    if (!lista.length) {
+      html += `<p>Nenhuma escala cadastrada.</p>`;
+    } else {
+      for (const [key, grupo] of porMes) {
+        const [y, m] = key.split("-");
+        const cols = colunasGrade(grupo.length);
+        html += `<section class="mes-bloco">
+          <h2 class="mes-titulo">${Cal().nomeMes(+m)} ${y}</h2>
+          <div class="esc-grid cols-${cols}">`;
+        for (const esc of grupo) html += htmlEscalaCard(state, esc, { compact: true });
+        html += `</div></section>`;
+      }
+    }
+    return {
+      titulo: "Escala completa",
+      html,
+      total: lista.length,
+      incompletas: incompletas.length,
+      avisos: montarAvisos(lista.length, incompletas.length),
+      landscape: lista.length >= 2,
+      grade: true,
+    };
   }
 
   function prepararEscala(state, data) {
@@ -130,36 +211,128 @@ window.DiaconiaPDF = (() => {
         total: 0,
         incompletas: 0,
         avisos: ["Esta data não tem escala cadastrada."],
+        landscape: false,
       };
     }
     const incompleta = escalaIncompleta(state, esc);
     return {
       titulo: `Escala ${data}`,
-      html: htmlEscala(state, esc),
+      html: htmlEscalaCard(state, esc, { compact: false }),
       total: 1,
       incompletas: incompleta ? 1 : 0,
       avisos: incompleta
         ? ["Esta escala está incompleta. O PDF será gerado com as vagas em aberto."]
         : [],
+      landscape: false,
     };
   }
 
-  function imprimir(titulo, corpoHtml) {
+  function estilosImpressao({ landscape } = {}) {
+    return `
+      * { box-sizing: border-box; }
+      body {
+        font-family: "Segoe UI", system-ui, sans-serif;
+        margin: 0;
+        padding: 10mm;
+        color: #1a2a2e;
+        font-size: 10px;
+        line-height: 1.25;
+      }
+      .doc-head { margin-bottom: 8px; }
+      .doc-head h1 {
+        font-size: 16px;
+        margin: 0 0 4px;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+      }
+      .doc-aviso { margin: 0; font-size: 10px; color: #a15c00; }
+      .mes-bloco { margin-top: 10px; page-break-inside: avoid; }
+      .mes-titulo {
+        font-size: 12px;
+        margin: 0 0 6px;
+        border-bottom: 1px solid #0f4c5c;
+        padding-bottom: 2px;
+        color: #0f4c5c;
+      }
+      .esc-grid {
+        display: grid;
+        gap: 8px;
+        align-items: start;
+      }
+      .esc-grid.cols-1 { grid-template-columns: 1fr; }
+      .esc-grid.cols-2 { grid-template-columns: 1fr 1fr; }
+      .esc-grid.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+      .esc-card {
+        border: 1px solid #9aabb0;
+        border-radius: 4px;
+        overflow: hidden;
+        background: #fff;
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+      .esc-card-head {
+        background: #0f4c5c;
+        color: #fff;
+        padding: 5px 7px;
+      }
+      .esc-card.is-incompleta .esc-card-head { background: #8a5a2b; }
+      .esc-card-date { font-weight: 700; font-size: 11px; }
+      .esc-card-meta { font-size: 9px; opacity: 0.92; margin-top: 1px; }
+      .esc-card-meta em { font-style: normal; color: #ffd8a8; }
+      .esc-card-lideres { font-size: 8px; opacity: 0.85; margin-top: 2px; }
+      .esc-eq-nome {
+        font-weight: 700;
+        font-size: 9px;
+        padding: 3px 7px;
+        background: #e8eef0;
+      }
+      .esc-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .esc-table th,
+      .esc-table td {
+        border-bottom: 1px solid #d5dde0;
+        padding: 2px 6px;
+        text-align: left;
+        vertical-align: top;
+        font-size: 9px;
+      }
+      .esc-table th {
+        background: #f3f6f7;
+        font-size: 8px;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        color: #445;
+      }
+      .esc-table th:first-child,
+      .esc-table td:first-child { width: 38%; }
+      .esc-table tr:nth-child(even) td { background: #f7fafb; }
+      .esc-table tr.row-vazio td { background: #fff8e8; }
+      .esc-empty { padding: 8px; margin: 0; font-style: italic; }
+      .esc-folha { max-width: 520px; margin: 0 auto; }
+      @page {
+        size: ${landscape ? "A4 landscape" : "A4 portrait"};
+        margin: 8mm;
+      }
+      @media print {
+        body { padding: 0; }
+        .esc-card { break-inside: avoid; page-break-inside: avoid; }
+        .mes-bloco { break-inside: avoid; page-break-inside: avoid; }
+      }
+    `.trim();
+  }
+
+  function imprimir(titulo, corpoHtml, opts = {}) {
     const w = window.open("", "_blank");
     if (!w) {
       return { ok: false, erro: "Permita pop-ups para gerar o PDF." };
     }
+    const landscape = !!opts.landscape;
     w.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"/>
       <title>${titulo}</title>
-      <style>
-        body{font-family:Georgia,serif;padding:24px;color:#1a1a1a}
-        h1{font-size:22px} h2{font-size:16px;margin-top:20px}
-        table{width:100%;border-collapse:collapse;margin:8px 0 16px}
-        th,td{border:1px solid #ccc;padding:6px 8px;text-align:left;font-size:12px}
-        th{background:#f0f0f0}
-        hr{border:none;border-top:1px solid #ddd;margin:28px 0}
-        @media print{body{padding:0}}
-      </style></head><body>${corpoHtml}
+      <style>${estilosImpressao({ landscape })}</style>
+      </head><body>${corpoHtml}
       <script>window.onload=()=>{window.print();}<\/script>
       </body></html>`);
     w.document.close();
@@ -167,7 +340,7 @@ window.DiaconiaPDF = (() => {
   }
 
   function gerarComPreparacao(prep) {
-    const print = imprimir(prep.titulo, prep.html);
+    const print = imprimir(prep.titulo, prep.html, { landscape: prep.landscape });
     if (!print.ok) return print;
     return { ok: true, ...prep };
   }
@@ -199,7 +372,7 @@ window.DiaconiaPDF = (() => {
       }
     }
     return gerarComPreparacao(
-      prepararLista(state, todas, `Escala — ${qtd} mês(es)`)
+      prepararLista(state, todas, `Escala — ${qtd} mês(es)`, { grade: true })
     );
   }
 

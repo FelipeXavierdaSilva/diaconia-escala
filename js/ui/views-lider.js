@@ -525,7 +525,7 @@ window.DiaconiaViewsLider = (() => {
 
     UI().openModal(`
       <h2>Gerar PDF</h2>
-      <p class="muted" style="margin-top:-4px">Inclui as escalas cadastradas — mesmo incompletas (com aviso antes de continuar).</p>
+      <p class="muted" style="margin-top:-4px">Mês em folha paisagem, cultos lado a lado (sem horário). Inclui escalas incompletas, com aviso.</p>
       <label class="field"><span><input type="radio" name="pdf-modo" id="pdf-modo-mes" value="mes" checked/> Mês atual — ${UI().esc(Cal().nomeMes(mes))} ${ano}</span></label>
       <label class="field"><span><input type="radio" name="pdf-modo" id="pdf-modo-tudo" value="tudo"/> Gerar tudo</span></label>
       <div class="modal-actions">
@@ -554,13 +554,13 @@ window.DiaconiaViewsLider = (() => {
           cancelText: "Cancelar",
         });
         if (!ok) return;
-        const res = PDF.imprimir(prep.titulo, prep.html);
+        const res = PDF.imprimir(prep.titulo, prep.html, { landscape: prep.landscape });
         if (!res.ok) return UI().toast(res.erro);
         UI().toast(prep.total ? "PDF aberto para impressão." : "PDF gerado (sem escalas neste período).");
         return;
       }
 
-      const res = PDF.imprimir(prep.titulo, prep.html);
+      const res = PDF.imprimir(prep.titulo, prep.html, { landscape: prep.landscape });
       if (!res.ok) return UI().toast(res.erro);
       UI().closeModal();
       UI().toast("PDF aberto para impressão.");
