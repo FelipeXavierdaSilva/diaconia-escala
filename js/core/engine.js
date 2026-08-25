@@ -414,15 +414,14 @@ window.DiaconiaEngine = (() => {
     }
 
     function slotsLivres(fid) {
-      const f = getFuncao(state, fid);
-      const qtd = f?.qtdPorEquipe || 1;
+      const qtd = qtdFuncaoNaEscala(state, escala, fid);
       return qtd - (atribuicoes[fid]?.length || 0);
     }
 
     function atribuir(fid, diaconoId) {
       if (!atribuicoes[fid]) atribuicoes[fid] = [];
       if (atribuicoes[fid].includes(diaconoId)) return;
-      const qtdMax = getFuncao(state, fid)?.qtdPorEquipe || 1;
+      const qtdMax = qtdFuncaoNaEscala(state, escala, fid);
       if (atribuicoes[fid].length >= qtdMax) return;
       atribuicoes[fid].push(diaconoId);
       usados.add(diaconoId);
@@ -554,9 +553,9 @@ window.DiaconiaEngine = (() => {
 
         const fidOk = shuffle(funcoesIds).find((fid) => {
           if (exigeCasal(state, fid)) return false;
-          const f = getFuncao(state, fid);
+          const qtd = qtdFuncaoNaEscala(state, escala, fid);
           return (
-            (f?.qtdPorEquipe || 1) >= 2 &&
+            qtd >= 2 &&
             slotsLivres(fid) >= 2 &&
             elegivel(a, fid) &&
             elegivel(b, fid)
@@ -574,7 +573,7 @@ window.DiaconiaEngine = (() => {
     for (const fid of funcoesNormais) {
       const funcao = getFuncao(state, fid);
       if (!funcao) continue;
-      const qtd = funcao.qtdPorEquipe || 1;
+      const qtd = qtdFuncaoNaEscala(state, escala, fid);
 
       while ((atribuicoes[fid]?.length || 0) < qtd) {
         if (atingiuLimitePessoas()) break;
@@ -615,7 +614,7 @@ window.DiaconiaEngine = (() => {
       for (const fid of funcoesNormais) {
         const funcao = getFuncao(state, fid);
         if (!funcao) continue;
-        const qtd = funcao.qtdPorEquipe || 1;
+        const qtd = qtdFuncaoNaEscala(state, escala, fid);
         while ((atribuicoes[fid]?.length || 0) < qtd) {
           const candidatos = shuffle(
             membros.filter((d) => elegivel(d, fid, { permitirReuso: true }))
@@ -626,10 +625,10 @@ window.DiaconiaEngine = (() => {
       }
     }
 
-    // 5) Vínculos (ex.: Lanche → Janta): prioriza quem está na origem, sem passar do qtdPorEquipe
+    // 5) Vínculos (ex.: Lanche → Janta): prioriza quem está na origem, sem passar da qtd do dia
     for (const v of cfg.vinculosFuncoes) {
       if (!funcoesIds.includes(v.de) || !funcoesIds.includes(v.para)) continue;
-      const qtdPara = getFuncao(state, v.para)?.qtdPorEquipe || 1;
+      const qtdPara = qtdFuncaoNaEscala(state, escala, v.para);
       const deIds = atribuicoes[v.de] || [];
       const atuaisPara = atribuicoes[v.para] || [];
       const novos = [];
@@ -647,9 +646,9 @@ window.DiaconiaEngine = (() => {
       atribuicoes[v.para] = novos;
     }
 
-    // 6) Nunca ultrapassar a quantidade configurada na aba Funções
+    // 6) Nunca ultrapassar a quantidade deste culto
     for (const fid of funcoesIds) {
-      const qtd = getFuncao(state, fid)?.qtdPorEquipe || 1;
+      const qtd = qtdFuncaoNaEscala(state, escala, fid);
       if ((atribuicoes[fid] || []).length > qtd) {
         atribuicoes[fid] = atribuicoes[fid].slice(0, qtd);
       }
@@ -658,7 +657,7 @@ window.DiaconiaEngine = (() => {
     for (const fid of funcoesIds) {
       const funcao = getFuncao(state, fid);
       if (!funcao) continue;
-      const qtd = funcao.qtdPorEquipe || 1;
+      const qtd = qtdFuncaoNaEscala(state, escala, fid);
       const ids = atribuicoes[fid] || [];
       if (ids.length < qtd) {
         const porLimite = atingiuLimitePessoas() && ids.length === 0;
@@ -846,10 +845,10 @@ window.DiaconiaEngine = (() => {
         hist = result.historico;
         problemas = problemas.concat(result.problemas);
       }
-      // Corta excesso legado (acima do qtdPorEquipe da aba Funções)
+      // Corta excesso acima da qtd deste culto (padrão ou override)
       for (const eqId of Object.keys(atr)) {
         for (const fid of Object.keys(atr[eqId] || {})) {
-          const qtd = getFuncao(state, fid)?.qtdPorEquipe || 1;
+          const qtd = qtdFuncaoNaEscala(state, esc, fid);
           if ((atr[eqId][fid] || []).length > qtd) {
             atr[eqId][fid] = atr[eqId][fid].slice(0, qtd);
           }
