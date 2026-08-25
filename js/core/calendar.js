@@ -122,6 +122,39 @@ window.DiaconiaCalendar = (() => {
     return toISO(new Date());
   }
 
+  /** Soma (ou subtrai) dias a uma data ISO. */
+  function addDays(iso, dias) {
+    const d = parseISO(iso);
+    d.setDate(d.getDate() + Number(dias || 0));
+    return toISO(d);
+  }
+
+  /** Lista inclusiva de datas ISO entre inicio e fim (ordenada). */
+  function datasEntre(inicioISO, fimISO) {
+    if (!inicioISO) return [];
+    let a = inicioISO;
+    let b = fimISO || inicioISO;
+    if (b < a) {
+      const t = a;
+      a = b;
+      b = t;
+    }
+    const out = [];
+    let cur = a;
+    while (cur <= b) {
+      out.push(cur);
+      cur = addDays(cur, 1);
+      if (out.length > 400) break;
+    }
+    return out;
+  }
+
+  /** dataFim a partir da data inicial e quantidade de dias (mín. 1). */
+  function fimPorQtdDias(inicioISO, qtdDias) {
+    const n = Math.max(1, Math.min(365, Number(qtdDias) || 1));
+    return addDays(inicioISO, n - 1);
+  }
+
   function compararHorario(h1, h2) {
     if (!h1 || !h2) return 0;
     if (h1 === "Final") return 1;
@@ -164,6 +197,9 @@ window.DiaconiaCalendar = (() => {
     funcaoEncaixaNaData,
     escalasDoMes,
     hojeISO,
+    addDays,
+    datasEntre,
+    fimPorQtdDias,
     compararHorario,
     horarioCompativel,
     horarioConflitaComJanela,

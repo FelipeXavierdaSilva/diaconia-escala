@@ -120,6 +120,9 @@ window.DiaconiaStorage = (() => {
       g.vinculosFuncoes =
         temLanche && temJanta ? [{ de: "lanche", para: "janta", ativo: true }] : [];
     }
+    if (!Array.isArray(g.incompatibilidadesFuncoes)) {
+      g.incompatibilidadesFuncoes = [];
+    }
     if (!Array.isArray(g.funcoesExigemCasal)) {
       g.funcoesExigemCasal = ["aconselhamento", "fechar_templo"].filter((id) =>
         (state.funcoes || []).some((f) => f.id === id)

@@ -1611,6 +1611,8 @@ window.DiaconiaViewsLider = (() => {
 
   /* ——— Restrições ——— */
   function motivoAviso(r) {
+    if (r.motivoViagem === "trabalho") return "Viagem a trabalho";
+    if (r.motivoViagem === "familiar") return "Viagem familiar";
     const obs = String(r.observacao || "");
     if (/emergência/i.test(obs)) return "Emergência";
     if (/ministério/i.test(obs)) return "Outro ministério";
@@ -1621,6 +1623,14 @@ window.DiaconiaViewsLider = (() => {
       outro: "Outro",
     };
     return tipoLabel[r.tipo] || r.tipo;
+  }
+
+  function periodoAviso(r) {
+    const Cal = window.DiaconiaCalendar;
+    if (r.dataFim && r.dataFim !== r.data) {
+      return `${Cal.formatBR(r.data)} a ${Cal.formatBR(r.dataFim)}`;
+    }
+    return Cal.formatBR(r.data);
   }
 
   function badgeStatusAviso(st) {
@@ -1645,7 +1655,7 @@ window.DiaconiaViewsLider = (() => {
       const d = state.diaconos.find((x) => x.id === r.diaconoId);
       return `<tr class="no-click">
         ${UI().bulkTd(r.id, "avisos-lider")}
-        <td>${UI().esc(Cal().formatBR(r.data))}</td>
+        <td>${UI().esc(periodoAviso(r))}</td>
         <td><strong>${UI().esc(d?.nome || "—")}</strong></td>
         <td>${UI().esc(motivoAviso(r))}${r.funcaoId ? " · " + UI().esc(UI().nomeFuncao(state, r.funcaoId)) : ""}${r.horarioChegada ? " · chega " + UI().esc(r.horarioChegada) : ""}</td>
         <td>${UI().esc(r.observacao || "—")}</td>
@@ -1675,7 +1685,7 @@ window.DiaconiaViewsLider = (() => {
             <strong>${UI().esc(d?.nome || "Diácono")}</strong>
             ${badgeStatusAviso(r.status)}
           </div>
-          <p style="margin:0"><strong>${UI().esc(Cal().formatBR(r.data))}</strong> · ${UI().esc(motivoAviso(r))}</p>
+          <p style="margin:0"><strong>${UI().esc(periodoAviso(r))}</strong> · ${UI().esc(motivoAviso(r))}</p>
           ${r.observacao ? `<p class="muted" style="margin:6px 0 0">${UI().esc(r.observacao)}</p>` : ""}
           <div class="toolbar" style="margin-top:12px">
             <button class="btn btn-primary btn-sm" data-act="apr" data-id="${r.id}">Aprovar</button>
@@ -2959,6 +2969,44 @@ window.DiaconiaViewsLider = (() => {
             </div>
 
             <div class="settings-block">
+              <h3>Incompatibilidades de funções</h3>
+              <p class="muted settings-hint">Pares que a mesma pessoa <strong>não</strong> pode fazer no mesmo culto. Tudo o mais é permitido (se “acumular funções” estiver ligado). Um vínculo anula a proibição desse par.</p>
+              <div id="cfg-incompats" class="grid" style="gap:10px">
+                ${(() => {
+                  const pares = Array.isArray(ger.incompatibilidadesFuncoes)
+                    ? ger.incompatibilidadesFuncoes
+                    : [];
+                  const opts = (sel) =>
+                    (state.funcoes || [])
+                      .filter((f) => f.ativo !== false)
+                      .map(
+                        (f) =>
+                          `<option value="${f.id}" ${f.id === sel ? "selected" : ""}>${UI().esc(f.emoji + " " + f.nome)}</option>`
+                      )
+                      .join("");
+                  if (!pares.length) {
+                    return `<p class="muted" id="cfg-incompats-empty" style="margin:0">Nenhuma incompatibilidade cadastrada.</p>`;
+                  }
+                  return pares
+                    .map(
+                      (p, i) => `<div class="incompat-row" data-idx="${i}" style="display:grid;grid-template-columns:1fr auto 1fr auto;gap:8px;align-items:end">
+                      <label class="field" style="margin:0"><span>Função A</span>
+                        <select class="select cfg-inc-a">${opts(p.a)}</select>
+                      </label>
+                      <span class="muted" style="padding-bottom:12px">≠</span>
+                      <label class="field" style="margin:0"><span>Função B</span>
+                        <select class="select cfg-inc-b">${opts(p.b)}</select>
+                      </label>
+                      <button type="button" class="btn btn-ghost btn-sm btn-inc-del" title="Remover">×</button>
+                    </div>`
+                    )
+                    .join("");
+                })()}
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" id="btn-add-incompat" style="margin-top:8px">+ Incompatibilidade</button>
+            </div>
+
+            <div class="settings-block">
               <h3>Casais</h3>
               <label class="field"><span><input type="checkbox" id="cfg-casais" ${cfg.respeitarCasais !== false ? "checked" : ""}/> Respeitar preferências de casais ao gerar</span></label>
               <p class="muted settings-hint">Inclui “mesmo dia”, “mesma função” e “não servir juntos” (aba <strong>Casais</strong>).</p>
@@ -3118,6 +3166,13 @@ window.DiaconiaViewsLider = (() => {
           ativo: true,
         }))
         .filter((v) => v.de && v.para && v.de !== v.para);
+      g.incompatibilidadesFuncoes = [...root.querySelectorAll("#cfg-incompats .incompat-row")]
+        .map((row) => ({
+          a: row.querySelector(".cfg-inc-a")?.value,
+          b: row.querySelector(".cfg-inc-b")?.value,
+          ativo: true,
+        }))
+        .filter((p) => p.a && p.b && p.a !== p.b);
       if (root.querySelector("#cfg-casais")) {
         state.configuracoes.respeitarCasais = root.querySelector("#cfg-casais").checked;
       }
@@ -3253,6 +3308,48 @@ window.DiaconiaViewsLider = (() => {
       const btn = e.target.closest(".btn-vin-del");
       if (!btn) return;
       btn.closest(".vinculo-row")?.remove();
+    });
+
+    const incBox = root.querySelector("#cfg-incompats");
+    const optsIncompat = () =>
+      (state.funcoes || [])
+        .filter((f) => f.ativo !== false)
+        .map((f) => `<option value="${f.id}">${UI().esc(f.emoji + " " + f.nome)}</option>`)
+        .join("");
+    root.querySelector("#btn-add-incompat")?.addEventListener("click", () => {
+      if (!incBox) return;
+      incBox.querySelector("#cfg-incompats-empty")?.remove();
+      const row = document.createElement("div");
+      row.className = "incompat-row";
+      row.style.cssText = "display:grid;grid-template-columns:1fr auto 1fr auto;gap:8px;align-items:end";
+      row.innerHTML = `
+        <label class="field" style="margin:0"><span>Função A</span>
+          <select class="select cfg-inc-a">${optsIncompat()}</select>
+        </label>
+        <span class="muted" style="padding-bottom:12px">≠</span>
+        <label class="field" style="margin:0"><span>Função B</span>
+          <select class="select cfg-inc-b">${optsIncompat()}</select>
+        </label>
+        <button type="button" class="btn btn-ghost btn-sm btn-inc-del" title="Remover">×</button>`;
+      const opts = [...(row.querySelector(".cfg-inc-a")?.options || [])];
+      if (opts.length >= 2) {
+        row.querySelector(".cfg-inc-a").value = opts[0].value;
+        row.querySelector(".cfg-inc-b").value = opts[1].value;
+      }
+      incBox.appendChild(row);
+    });
+    incBox?.addEventListener("click", (e) => {
+      const btn = e.target.closest(".btn-inc-del");
+      if (!btn) return;
+      btn.closest(".incompat-row")?.remove();
+      if (incBox && !incBox.querySelector(".incompat-row") && !incBox.querySelector("#cfg-incompats-empty")) {
+        const empty = document.createElement("p");
+        empty.className = "muted";
+        empty.id = "cfg-incompats-empty";
+        empty.style.margin = "0";
+        empty.textContent = "Nenhuma incompatibilidade cadastrada.";
+        incBox.appendChild(empty);
+      }
     });
 
     root.querySelector("#btn-save-wa")?.addEventListener("click", () => {

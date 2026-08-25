@@ -1045,6 +1045,41 @@ td.toolbar {
   margin: 4px 0;
 }
 
+.hero-next-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 2px;
+}
+
+.hero-next-date {
+  flex: 1;
+  margin: 0;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.hero-next-nav {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.hero-next-nav:hover {
+  background: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.45);
+}
+
 .hero-next .funcao-destaque {
   margin-top: 14px;
   padding: 12px 14px;
@@ -1052,6 +1087,34 @@ td.toolbar {
   background: rgba(255, 255, 255, 0.12);
   font-size: 1.25rem;
   font-family: var(--font-display);
+}
+
+.hero-next .funcao-destaque-label {
+  font-size: 12px;
+  font-family: var(--font-body);
+  font-weight: 600;
+  opacity: 0.85;
+  margin-bottom: 8px;
+  letter-spacing: 0.02em;
+}
+
+.hero-next .funcao-destaque-item + .funcao-destaque-item {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.hero-next .funcao-destaque-nome {
+  font-size: 1.2rem;
+  line-height: 1.25;
+}
+
+.hero-next .funcao-destaque-hora {
+  font-size: 14px;
+  font-family: var(--font-body);
+  opacity: 0.9;
+  margin-top: 4px;
+  font-weight: 500;
 }
 
 /* —— Tables —— */
@@ -1950,6 +2013,32 @@ table.data tbody tr.no-click {
 .cal-diacono .mine-day {
   background: color-mix(in srgb, var(--teal) 12%, #fff);
   border-color: color-mix(in srgb, var(--teal) 40%, var(--line));
+}
+
+.cal-diacono .cal-day.clickable {
+  cursor: pointer;
+}
+
+.cal-diacono .cal-day.clickable:hover {
+  border-color: color-mix(in srgb, var(--accent, #e07a5f) 55%, var(--line));
+  background: color-mix(in srgb, var(--accent, #e07a5f) 8%, #fff);
+}
+
+.cal-diacono .away-day {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent, #e07a5f) 70%, transparent);
+}
+
+.cal-diacono .away-day.mine-day {
+  background: color-mix(in srgb, var(--accent, #e07a5f) 14%, #fff);
+}
+
+.cal-diacono .mark-away {
+  background: var(--accent, #e07a5f) !important;
+}
+
+.cal-legenda-away {
+  color: var(--accent, #e07a5f);
+  font-weight: 600;
 }
 
 .cal-diacono .cal-fn {

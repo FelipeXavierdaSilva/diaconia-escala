@@ -55,9 +55,12 @@ window.DiaconiaViewsDiacono = (() => {
     const { state, ano, mes } = app;
     const did = diaconoId(app);
     const d = state.diaconos.find((x) => x.id === did);
-    const prox = Engine().proximaEscala(state, did);
+    const futuras = Engine().proximasEscalasDiacono(state, did);
+    if (app.heroProxIdx == null || app.heroProxIdx < 0) app.heroProxIdx = 0;
+    if (futuras.length && app.heroProxIdx >= futuras.length) app.heroProxIdx = futuras.length - 1;
+    if (!futuras.length) app.heroProxIdx = 0;
+    const hero = futuras[app.heroProxIdx] || null;
     const resumo = Engine().resumoMesDiacono(state, did, ano, mes);
-    const f = prox ? Engine().getFuncao(state, prox.funcaoId) : null;
 
     const pendentes = (state.trocas || []).filter(
       (t) => t.paraDiaconoId === did && t.status === "aguardando_aceite"
@@ -68,42 +71,118 @@ window.DiaconiaViewsDiacono = (() => {
     const avisosN = pendentes + unread;
 
     const parts = Engine().participacoesDoDiacono(state, did, ano, mes);
-    const mapParts = Object.fromEntries(parts.map((p) => [p.data, p]));
+    const mapParts = {};
+    for (const p of parts) {
+      if (!mapParts[p.data]) mapParts[p.data] = [];
+      mapParts[p.data].push(p);
+    }
+
+    const viagensMes = (state.restricoes || []).filter(
+      (r) =>
+        r.diaconoId === did &&
+        r.motivoViagem &&
+        r.status !== "rejeitada" &&
+        Engine().datasDaRestricao(r).some((d) => d.startsWith(`${ano}-${String(mes).padStart(2, "0")}`))
+    );
+    const diasViagem = new Set();
+    for (const v of viagensMes) {
+      for (const d of Engine().datasDaRestricao(v)) diasViagem.add(d);
+    }
+
     const grade = Cal().gradeMes(ano, mes);
 
     const cells = grade
       .map((iso) => {
         if (!iso) return `<div class="cal-day empty"></div>`;
         const day = +iso.split("-")[2];
-        const p = mapParts[iso];
+        const ps = mapParts[iso];
         const esc = state.escalas[iso];
-        if (p) {
-          const fn = Engine().getFuncao(state, p.funcaoId);
-          return `<div class="cal-day has-event mine-day" data-data="${iso}" title="${UI().esc(fn?.nome || "")}">
-            <span class="n">${day}</span>
-            <span class="cal-fn">${UI().esc(fn?.emoji || "●")}</span>
-          </div>`;
+        const emViagem = diasViagem.has(iso);
+        const classes = ["cal-day", "clickable"];
+        if (ps?.length) classes.push("has-event", "mine-day");
+        else if (esc) classes.push("has-event");
+        if (emViagem) classes.push("away-day");
+
+        let mark = "";
+        let title = "Clique para informar viagem ou ver opções";
+        if (ps?.length) {
+          const emojis = ps
+            .map((p) => Engine().getFuncao(state, p.funcaoId)?.emoji || "●")
+            .join("");
+          const nomes = ps
+            .map((p) => Engine().getFuncao(state, p.funcaoId)?.nome || "")
+            .filter(Boolean)
+            .join(", ");
+          mark = `<span class="cal-fn">${UI().esc(emojis)}</span>`;
+          title = `${nomes}${emViagem ? " · Em viagem" : ""}`;
+        } else if (emViagem) {
+          mark = `<span class="mark mark-away"></span>`;
+          title = "Você marcou viagem neste dia";
+        } else if (esc) {
+          mark = `<span class="mark" style="background:var(--muted)"></span>`;
+          title = "Há culto — você não está escalado. Clique para informar viagem.";
         }
-        if (esc) {
-          return `<div class="cal-day has-event" data-data="${iso}" style="opacity:.5" title="Há culto — você não está escalado">
+
+        return `<div class="${classes.join(" ")}" data-data="${iso}" title="${UI().esc(title)}"${esc && !ps?.length ? ' style="opacity:.65"' : ""}>
             <span class="n">${day}</span>
-            <span class="mark" style="background:var(--muted)"></span>
+            ${mark}
           </div>`;
-        }
-        return `<div class="cal-day"><span class="n">${day}</span></div>`;
       })
       .join("");
 
-    const rows = resumo.partes
-      .map((p) => {
-        const fn = Engine().getFuncao(state, p.funcaoId);
-        return `<tr data-data="${p.data}">
-          <td>${UI().esc(Cal().formatBRCurto(p.data))}<div class="muted" style="font-size:12px">${UI().esc(Cal().diaSemana(p.data))}</div></td>
-          <td><strong>${UI().esc((fn?.emoji || "") + " " + (fn?.nome || ""))}</strong></td>
-          <td>${UI().esc(fn?.horario || p.escala.horario)}</td>
+    const porDia = [];
+    for (const p of resumo.partes) {
+      const last = porDia[porDia.length - 1];
+      if (last && last.data === p.data) last.partes.push(p);
+      else porDia.push({ data: p.data, partes: [p] });
+    }
+    const rows = porDia
+      .map((dia) => {
+        const fns = dia.partes
+          .map((p) => {
+            const fn = Engine().getFuncao(state, p.funcaoId);
+            return `${fn?.emoji || ""} ${fn?.nome || ""}`.trim();
+          })
+          .join(" · ");
+        const horas = [
+          ...new Set(
+            dia.partes.map((p) => {
+              const fn = Engine().getFuncao(state, p.funcaoId);
+              return fn?.horario || p.escala.horario || "";
+            })
+          ),
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        return `<tr data-data="${dia.data}">
+          <td>${UI().esc(Cal().formatBRCurto(dia.data))}<div class="muted" style="font-size:12px">${UI().esc(Cal().diaSemana(dia.data))}</div></td>
+          <td><strong>${UI().esc(fns)}</strong></td>
+          <td>${UI().esc(horas)}</td>
         </tr>`;
       })
       .join("");
+
+    const heroFuncoesHtml = hero
+      ? hero.partes
+          .map((p) => {
+            const fn = Engine().getFuncao(state, p.funcaoId);
+            const eq = UI().nomeEquipePublico(state, p.equipeId);
+            return `<div class="funcao-destaque-item">
+              <div class="funcao-destaque-nome">${UI().esc((fn?.emoji || "") + " " + (fn?.nome || ""))}</div>
+              <div class="funcao-destaque-hora">Chegar às ${UI().esc(fn?.horario || hero.escala.horario)}${
+                eq ? ` · ${UI().esc(eq)}` : ""
+              }</div>
+            </div>`;
+          })
+          .join("")
+      : "";
+
+    const temProx = futuras.length > 1 && app.heroProxIdx < futuras.length - 1;
+    const temAnt = app.heroProxIdx > 0;
+    const chevron = (dir) =>
+      dir === "next"
+        ? `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>`
+        : `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>`;
 
     return `
       <div class="topbar">
@@ -125,24 +204,38 @@ window.DiaconiaViewsDiacono = (() => {
 
       <div class="grid grid-2 diacono-home-grid" style="margin-bottom:16px">
         <div class="panel hero-next">
-          <p class="eyebrow" style="opacity:.85;letter-spacing:.12em;font-size:11px;font-weight:700;text-transform:uppercase;margin:0 0 6px">Próximo culto</p>
+          <p class="eyebrow" style="opacity:.85;letter-spacing:.12em;font-size:11px;font-weight:700;text-transform:uppercase;margin:0 0 6px">${
+            app.heroProxIdx === 0 ? "Próximo culto" : "Culto escalado"
+          }</p>
           ${
-            prox
+            hero
               ? `
-            <h2>${UI().esc(Cal().diaSemana(prox.data))} — ${UI().esc(Cal().formatBR(prox.data))}</h2>
-            <p class="meta">${UI().esc(prox.escala.nome)}${
-              UI().nomeEquipePublico(state, prox.equipeId)
-                ? ` · ${UI().esc(UI().nomeEquipePublico(state, prox.equipeId))}`
-                : ""
+            <div class="hero-next-title-row">
+              ${
+                temAnt
+                  ? `<button type="button" class="hero-next-nav" id="btn-prox-culto-prev" title="Culto anterior escalado" aria-label="Culto anterior escalado">${chevron("prev")}</button>`
+                  : ""
+              }
+              <h2 class="hero-next-date">${UI().esc(Cal().diaSemana(hero.data))} — ${UI().esc(Cal().formatBR(hero.data))}</h2>
+              ${
+                temProx
+                  ? `<button type="button" class="hero-next-nav" id="btn-prox-culto-next" title="Próximo culto escalado" aria-label="Próximo culto escalado">${chevron("next")}</button>`
+                  : ""
+              }
+            </div>
+            <p class="meta">${UI().esc(hero.escala.nome)}${
+              (() => {
+                const eqs = [...new Set(hero.partes.map((p) => UI().nomeEquipePublico(state, p.equipeId)).filter(Boolean))];
+                return eqs.length ? ` · ${UI().esc(eqs.join(", "))}` : "";
+              })()
             }</p>
             <div class="funcao-destaque">
-              Sua função<br/>
-              ${UI().esc((f?.emoji || "") + " " + (f?.nome || ""))}
-              <div style="font-size:14px;font-family:var(--font-body);opacity:.9;margin-top:6px;font-weight:500">Chegar às ${UI().esc(f?.horario || prox.escala.horario)}</div>
+              <div class="funcao-destaque-label">${hero.partes.length > 1 ? "Suas funções" : "Sua função"}</div>
+              ${heroFuncoesHtml}
             </div>
             <div class="toolbar" style="margin-top:14px">
-              <button class="btn btn-accent" id="btn-det-prox" data-data="${prox.data}">Ver detalhes</button>
-              <button class="btn btn-ghost" id="btn-nao-posso" data-data="${prox.data}">Não posso ir</button>
+              <button class="btn btn-accent" id="btn-det-prox" data-data="${hero.data}">Ver detalhes</button>
+              <button class="btn btn-ghost" id="btn-nao-posso" data-data="${hero.data}">Não posso ir</button>
             </div>`
               : `<h2>Nenhum culto futuro</h2><p class="meta">Quando a liderança gerar a escala, ela aparece aqui.</p>`
           }
@@ -150,7 +243,11 @@ window.DiaconiaViewsDiacono = (() => {
 
         <div class="panel">
           <div class="panel-head"><h2>${UI().esc(Cal().nomeMes(mes))} ${ano}</h2></div>
-          <p class="muted" style="margin:0 0 10px;font-size:13px">Destaque = você está escalado. Cinza = há culto, mas não é a sua vez.</p>
+          <p class="muted" style="margin:0 0 10px;font-size:13px">
+            Destaque = você está escalado · Cinza = culto sem você ·
+            <span class="cal-legenda-away">Laranja</span> = viagem.
+            <strong>Clique em um dia</strong> para informar quantos dias estará fora.
+          </p>
           <div class="cal-wrap">
             <div class="cal cal-fit cal-diacono">
               ${Cal().DIAS_CURTOS.map((x) => `<div class="cal-head">${x}</div>`).join("")}
@@ -190,6 +287,15 @@ window.DiaconiaViewsDiacono = (() => {
       app.render();
     });
 
+    root.querySelector("#btn-prox-culto-next")?.addEventListener("click", () => {
+      app.heroProxIdx = (app.heroProxIdx || 0) + 1;
+      app.render();
+    });
+    root.querySelector("#btn-prox-culto-prev")?.addEventListener("click", () => {
+      app.heroProxIdx = Math.max(0, (app.heroProxIdx || 0) - 1);
+      app.render();
+    });
+
     root.querySelector("#btn-det-prox")?.addEventListener("click", (e) => {
       openEscala(app, e.currentTarget.dataset.data);
     });
@@ -209,7 +315,215 @@ window.DiaconiaViewsDiacono = (() => {
     });
 
     root.querySelectorAll(".cal-day[data-data]").forEach((el) => {
-      el.addEventListener("click", () => openEscala(app, el.dataset.data));
+      el.addEventListener("click", () => abrirOpcoesDiaCalendario(app, el.dataset.data));
+    });
+  }
+
+  function viagemQueCobre(state, did, data) {
+    return (state.restricoes || []).find(
+      (r) =>
+        r.diaconoId === did &&
+        r.motivoViagem &&
+        r.status !== "rejeitada" &&
+        Engine().restricaoCobreData(r, data)
+    );
+  }
+
+  function abrirOpcoesDiaCalendario(app, data) {
+    const { state } = app;
+    const did = diaconoId(app);
+    const esc = state.escalas[data];
+    const minha = Engine().diaconoEstaEscaladoNaData(state, did, data);
+    const viagem = viagemQueCobre(state, did, data);
+
+    UI().openModal(`
+      <h2>${UI().esc(Cal().formatBR(data))}</h2>
+      <p class="muted" style="margin-top:0">${UI().esc(Cal().diaSemana(data))}${
+        esc ? ` · ${UI().esc(esc.nome || "Culto")}` : ""
+      }</p>
+      <div class="choice-stack">
+        <button type="button" class="btn btn-choice" data-act="viagem">
+          <strong>${viagem ? "Editar / ver viagem" : "Informar viagem"}</strong>
+          <span>${
+            viagem
+              ? `Período já marcado (${UI().esc(Cal().formatBR(viagem.data))}${
+                  viagem.dataFim && viagem.dataFim !== viagem.data
+                    ? ` a ${UI().esc(Cal().formatBR(viagem.dataFim))}`
+                    : ""
+                })`
+              : "Trabalho ou familiar — quantos dias estará fora"
+          }</span>
+        </button>
+        ${
+          esc
+            ? `<button type="button" class="btn btn-choice" data-act="escala">
+                <strong>${minha ? "Ver minha escala" : "Ver culto do dia"}</strong>
+                <span>${minha ? "Função e horário neste culto" : "Quem está escalado neste dia"}</span>
+              </button>`
+            : ""
+        }
+        ${
+          minha
+            ? `<button type="button" class="btn btn-choice" data-act="nao-posso">
+                <strong>Não posso ir (só este culto)</strong>
+                <span>Emergência, outro ministério ou pedir cobertura</span>
+              </button>`
+            : ""
+        }
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" data-act="cancel">Fechar</button>
+      </div>
+    `);
+
+    const m = document.getElementById("modal-root");
+    m.addEventListener("click", (e) => {
+      const act = e.target.closest("[data-act]")?.dataset.act;
+      if (act === "cancel") return UI().closeModal();
+      if (act === "viagem") {
+        UI().closeModal();
+        formViagem(app, viagem || null, { data });
+        return;
+      }
+      if (act === "escala") {
+        UI().closeModal();
+        openEscala(app, data);
+        return;
+      }
+      if (act === "nao-posso") {
+        UI().closeModal();
+        escolherMotivoNaoPosso(app, { data });
+      }
+    });
+  }
+
+  function formViagem(app, restricao = null, opts = {}) {
+    const { state } = app;
+    const dataIni = restricao?.data || opts.data || Cal().hojeISO();
+    const qtdAtual = restricao
+      ? Engine().datasDaRestricao(restricao).length
+      : 1;
+    const motivo = restricao?.motivoViagem || "trabalho";
+    const obsLivre = String(restricao?.observacao || "")
+      .replace(/^Viagem a trabalho \(\d+ dias?\)\s*—?\s*/i, "")
+      .replace(/^Viagem familiar \(\d+ dias?\)\s*—?\s*/i, "")
+      .trim();
+
+    UI().openModal(`
+      <h2>${restricao ? "Editar viagem" : "Informar viagem"}</h2>
+      <p class="muted" style="margin-top:0">
+        O sistema <strong>já considera</strong> esses dias na geração da escala — você não será escalado nesse período.
+      </p>
+      <label class="field"><span>A partir de</span>
+        <input type="date" id="v-inicio" value="${UI().esc(dataIni)}"/>
+      </label>
+      <label class="field"><span>Quantos dias estará fora?</span>
+        <input type="number" id="v-qtd" class="input" min="1" max="365" value="${qtdAtual}"/>
+      </label>
+      <p class="muted" style="margin:-6px 0 12px;font-size:13px" id="v-fim-hint"></p>
+      <label class="field"><span>Motivo</span>
+        <div class="radio-list" style="margin-top:6px">
+          <label><input type="radio" name="v-motivo" value="trabalho" ${motivo === "trabalho" ? "checked" : ""}/> Viagem a trabalho</label>
+          <label><input type="radio" name="v-motivo" value="familiar" ${motivo === "familiar" ? "checked" : ""}/> Viagem familiar</label>
+        </div>
+      </label>
+      <label class="field"><span>Observação (opcional)</span>
+        <textarea id="v-obs" class="textarea" rows="2" placeholder="Ex.: congresso, férias com a família…">${UI().esc(obsLivre)}</textarea>
+      </label>
+      <div class="modal-actions">
+        ${
+          restricao
+            ? `<button type="button" class="btn btn-danger" data-act="delete" style="margin-right:auto">Excluir viagem</button>`
+            : ""
+        }
+        <button type="button" class="btn btn-ghost" data-act="cancel">Cancelar</button>
+        <button type="button" class="btn btn-accent" data-act="save">Salvar</button>
+      </div>
+    `);
+
+    const m = document.getElementById("modal-root");
+    const syncFim = () => {
+      const ini = m.querySelector("#v-inicio")?.value;
+      const qtd = Math.max(1, Number(m.querySelector("#v-qtd")?.value) || 1);
+      const hint = m.querySelector("#v-fim-hint");
+      if (!hint || !ini) return;
+      const fim = Cal().fimPorQtdDias(ini, qtd);
+      hint.textContent =
+        qtd === 1
+          ? `Fora em ${Cal().formatBR(ini)} (${Cal().diaSemana(ini)}).`
+          : `Fora de ${Cal().formatBR(ini)} a ${Cal().formatBR(fim)} (${qtd} dias).`;
+    };
+    m.querySelector("#v-inicio")?.addEventListener("change", syncFim);
+    m.querySelector("#v-qtd")?.addEventListener("input", syncFim);
+    syncFim();
+
+    m.addEventListener("click", async (e) => {
+      const act = e.target.closest("[data-act]")?.dataset.act;
+      if (act === "cancel") return UI().closeModal();
+      if (act === "delete" && restricao) {
+        const ok = await UI().confirmDelete({
+          itemLabel: `a viagem de <strong>${UI().esc(Cal().formatBR(restricao.data))}</strong>`,
+          detalhes: "Esses dias voltam a ficar disponíveis na geração da escala.",
+        });
+        if (!ok) return;
+        const resDel = window.DiaconiaRestrictions.excluir(state, restricao.id, window.DiaconiaAuth.sessao());
+        if (!resDel.ok) return UI().toast(resDel.erro);
+        UI().closeModal();
+        app.save();
+        app.render();
+        UI().toast("Viagem removida.");
+        return;
+      }
+      if (act !== "save") return;
+
+      const inicio = m.querySelector("#v-inicio")?.value;
+      const qtd = Math.max(1, Math.min(365, Number(m.querySelector("#v-qtd")?.value) || 1));
+      const motivoSel = m.querySelector('input[name="v-motivo"]:checked')?.value || "trabalho";
+      const obs = m.querySelector("#v-obs")?.value.trim() || "";
+      if (!inicio) return UI().toast("Informe a data de início.");
+
+      const sessao = window.DiaconiaAuth.sessao();
+      let res;
+      if (restricao) {
+        const fim = Cal().fimPorQtdDias(inicio, qtd);
+        const observacao = [
+          `Viagem ${motivoSel === "trabalho" ? "a trabalho" : "familiar"} (${qtd} dia${qtd > 1 ? "s" : ""})`,
+          obs,
+        ]
+          .filter(Boolean)
+          .join(" — ");
+        res = window.DiaconiaRestrictions.atualizar(
+          state,
+          restricao.id,
+          {
+            data: inicio,
+            dataFim: fim === inicio ? null : fim,
+            qtdDias: qtd,
+            tipo: "indisponivel",
+            motivoViagem: motivoSel,
+            observacao,
+          },
+          sessao
+        );
+      } else {
+        res = window.DiaconiaRestrictions.criarViagem(
+          state,
+          { data: inicio, qtdDias: qtd, motivoViagem: motivoSel, observacao: obs },
+          sessao
+        );
+      }
+
+      if (!res?.ok) return UI().toast(res?.erro || "Não foi possível salvar.");
+      UI().closeModal();
+      app.save();
+      app.render();
+
+      const afet = res.afetacoes?.length || res.restricao?.afetacoes?.length;
+      if (afet) {
+        UI().toast("Viagem salva. Você já estava em alguma escala — a liderança verá o alerta.");
+      } else {
+        UI().toast("Viagem salva. Esses dias não entram na geração da escala.");
+      }
     });
   }
 
@@ -261,12 +575,25 @@ window.DiaconiaViewsDiacono = (() => {
       outro: "Outro",
     };
 
+    const labelRest = (r) => {
+      if (r.motivoViagem === "trabalho") return "Viagem a trabalho";
+      if (r.motivoViagem === "familiar") return "Viagem familiar";
+      return tipoRest[r.tipo] || r.tipo;
+    };
+
+    const periodoRest = (r) => {
+      if (r.dataFim && r.dataFim !== r.data) {
+        return `${Cal().formatBR(r.data)} a ${Cal().formatBR(r.dataFim)}`;
+      }
+      return Cal().formatBR(r.data);
+    };
+
     const rowsRest = minhasRest
       .map(
         (r) => `<tr class="no-click">
         ${UI().bulkTd(r.id, "avisos-rest-diacono")}
-        <td>${UI().esc(Cal().formatBR(r.data))}</td>
-        <td>${UI().esc(tipoRest[r.tipo] || r.tipo)}</td>
+        <td>${UI().esc(periodoRest(r))}</td>
+        <td>${UI().esc(labelRest(r))}</td>
         <td>${UI().esc(r.observacao || "—")}</td>
         <td>${labelStatusRestricao(r.status)}</td>
         <td class="toolbar">${acoesRestricao(r)}</td>
@@ -359,7 +686,9 @@ window.DiaconiaViewsDiacono = (() => {
 
     root.querySelectorAll('[data-act="edit-r"]').forEach((btn) => {
       btn.addEventListener("click", () => {
-        formRestricao(app, state.restricoes.find((x) => x.id === btn.dataset.id));
+        const r = state.restricoes.find((x) => x.id === btn.dataset.id);
+        if (r?.motivoViagem) formViagem(app, r);
+        else formRestricao(app, r);
       });
     });
 

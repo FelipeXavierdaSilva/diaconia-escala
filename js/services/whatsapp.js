@@ -360,6 +360,8 @@ window.DiaconiaWhatsApp = (() => {
   }
 
   function motivoAvisoTexto(restricao) {
+    if (restricao?.motivoViagem === "trabalho") return "Viagem a trabalho";
+    if (restricao?.motivoViagem === "familiar") return "Viagem familiar";
     const obs = String(restricao?.observacao || "");
     if (/emergência/i.test(obs)) return "Emergência";
     if (/ministério/i.test(obs)) return "Escalado em outro ministério";
@@ -445,17 +447,21 @@ window.DiaconiaWhatsApp = (() => {
     }
 
     if (tipo === "aviso_restricao") {
-      const { nomeLider, diaconoNome, data, motivo, observacao } = dados;
+      const { nomeLider, diaconoNome, data, dataFim, motivo, observacao } = dados;
       const link = portalUrl(state, "?ir=restricoes");
       const obs = observacao?.trim() ? `\n💬 *Detalhe:* ${observacao.trim()}` : "";
+      const dataBr =
+        dataFim && dataFim !== data
+          ? `${Cal().formatBR(data)} a ${Cal().formatBR(dataFim)}`
+          : Cal().formatBR(data);
 
       return (
         `Olá, ${primeiroNome(nomeLider) || nomeLider}! 📢\n\n` +
-        `*${diaconoNome}* enviou um aviso (*Não posso ir*):\n\n` +
-        `📅 *Data:* ${Cal().formatBR(data)}\n` +
+        `*${diaconoNome}* informou indisponibilidade:\n\n` +
+        `📅 *Período:* ${dataBr}\n` +
         `📝 *Motivo:* ${motivo || "Indisponibilidade"}${obs}\n` +
         `⛪ *${igreja}*\n\n` +
-        `Revise e aprove ou recuse no painel da liderança (*Avisos*):\n${link}`
+        `Isso já vale para a geração da escala. Veja em *Avisos*:\n${link}`
       );
     }
 
@@ -761,6 +767,7 @@ window.DiaconiaWhatsApp = (() => {
         nomeLider: l.nome,
         diaconoNome: diaconoNome || nomeDiacono(state, restricao.diaconoId),
         data: restricao.data,
+        dataFim: restricao.dataFim || null,
         motivo,
         observacao: restricao.observacao,
       });

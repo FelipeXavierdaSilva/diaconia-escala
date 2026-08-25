@@ -63,9 +63,22 @@ window.DiaconiaEngine = (() => {
     );
   }
 
+  /** True se a restrição cobre a data (dia único ou período data…dataFim). */
+  function restricaoCobreData(restricao, data) {
+    if (!restricao?.data || !data) return false;
+    const fim = restricao.dataFim && restricao.dataFim >= restricao.data ? restricao.dataFim : restricao.data;
+    return data >= restricao.data && data <= fim;
+  }
+
+  function datasDaRestricao(restricao) {
+    if (!restricao?.data) return [];
+    const fim = restricao.dataFim && restricao.dataFim >= restricao.data ? restricao.dataFim : restricao.data;
+    return Cal().datasEntre(restricao.data, fim);
+  }
+
   function restricoesPara(state, diaconoId, data) {
     return restricoesAtivas(state).filter(
-      (r) => r.diaconoId === diaconoId && r.data === data
+      (r) => r.diaconoId === diaconoId && restricaoCobreData(r, data)
     );
   }
 
@@ -140,6 +153,7 @@ window.DiaconiaEngine = (() => {
    * @param {object} [opts]
    * @param {boolean} [opts.permitirReuso] — se true, ignora usadosNoDia (acúmulo de funções)
    * @param {Set} [opts.jaNaFuncao]
+   * @param {object} [opts.atribuicoesHoje] — mapa { funcaoId: [diaconoId] } do culto
    */
   function candidatoValido(state, diacono, data, funcaoId, usadosNoDia, opts = {}) {
     if (!diacono || diacono.ativo === false) return false;
@@ -152,6 +166,11 @@ window.DiaconiaEngine = (() => {
       const info = infoCasal(state, diacono.id);
       if (info?.casal?.naoServirJuntos && usadosNoDia.has(info.parceiroId)) return false;
     }
+    // Combinações proibidas no mesmo culto (Configurações)
+    if (opts.atribuicoesHoje) {
+      const ja = funcoesDoDiaconoNasAtribuicoes(opts.atribuicoesHoje, diacono.id);
+      if (conflitaComFuncoesJaEscaladas(state, funcaoId, ja)) return false;
+    }
     const chegada = chegadaMaxima(state, diacono.id, data);
     const funcao = getFuncao(state, funcaoId);
     if (chegada && funcao && !Cal().horarioCompativel(chegada, funcao.horario)) {
@@ -161,6 +180,35 @@ window.DiaconiaEngine = (() => {
     // Já atribuído a esta função nesta equipe (evita duplicar no mesmo slot)
     if (opts.jaNaFuncao instanceof Set && opts.jaNaFuncao.has(diacono.id)) return false;
     return true;
+  }
+
+  function funcoesDoDiaconoNasAtribuicoes(atribuicoes, diaconoId) {
+    const set = new Set();
+    for (const [fid, ids] of Object.entries(atribuicoes || {})) {
+      if ((ids || []).includes(diaconoId)) set.add(fid);
+    }
+    return set;
+  }
+
+  /** Par proibido entre duas funções (vínculo Lanche→Janta anula a proibição desse par). */
+  function funcoesSaoIncompativeis(state, fidA, fidB) {
+    if (!fidA || !fidB || fidA === fidB) return false;
+    const cfg = cfgGeracao(state);
+    const vinculado = cfg.vinculosFuncoes.some(
+      (v) =>
+        (v.de === fidA && v.para === fidB) || (v.de === fidB && v.para === fidA)
+    );
+    if (vinculado) return false;
+    return cfg.incompatibilidadesFuncoes.some(
+      (p) => (p.a === fidA && p.b === fidB) || (p.a === fidB && p.b === fidA)
+    );
+  }
+
+  function conflitaComFuncoesJaEscaladas(state, funcaoId, funcoesJa) {
+    for (const fid of funcoesJa || []) {
+      if (funcoesSaoIncompativeis(state, funcaoId, fid)) return true;
+    }
+    return false;
   }
 
   function funcoesPadraoAtivas(state) {
@@ -315,6 +363,11 @@ window.DiaconiaEngine = (() => {
         ? [...g.funcoesExigemCasal]
         : [...FUNCOES_EXIGEM_CASAL_PADRAO],
       vinculosFuncoes: vinculos,
+      incompatibilidadesFuncoes: Array.isArray(g.incompatibilidadesFuncoes)
+        ? g.incompatibilidadesFuncoes
+            .filter((p) => p && p.a && p.b && p.a !== p.b && p.ativo !== false)
+            .map((p) => ({ a: p.a, b: p.b, ativo: true }))
+        : [],
     };
   }
 
@@ -455,6 +508,7 @@ window.DiaconiaEngine = (() => {
         candidatoValido(state, d, data, fid, usados, {
           permitirReuso: !!opts.permitirReuso,
           jaNaFuncao: new Set(atribuicoes[fid] || []),
+          atribuicoesHoje: atribuicoes,
         })
       );
     }
@@ -641,7 +695,13 @@ window.DiaconiaEngine = (() => {
       }
       for (const id of atuaisPara) {
         if (novos.length >= qtdPara) break;
-        if (!novos.includes(id)) novos.push(id);
+        if (!novos.includes(id)) {
+          // Não manter alguém em "para" se conflitar com outra função dele (exceto o vínculo)
+          const ja = funcoesDoDiaconoNasAtribuicoes(atribuicoes, id);
+          ja.delete(v.para);
+          if (conflitaComFuncoesJaEscaladas(state, v.para, ja)) continue;
+          novos.push(id);
+        }
       }
       atribuicoes[v.para] = novos;
     }
@@ -1064,10 +1124,13 @@ window.DiaconiaEngine = (() => {
 
   function candidatosParaFuncao(state, data, equipeId, funcaoId, excluirIds = []) {
     const excluidos = new Set(excluirIds);
+    const atr = state.escalas[data]?.atribuicoes?.[equipeId] || {};
     return diaconosDaEquipe(state, equipeId).filter(
       (d) =>
         !excluidos.has(d.id) &&
-        candidatoValido(state, d, data, funcaoId, new Set())
+        candidatoValido(state, d, data, funcaoId, new Set(), {
+          atribuicoesHoje: atr,
+        })
     );
   }
 
@@ -1076,11 +1139,26 @@ window.DiaconiaEngine = (() => {
     if (!escala) return { ok: false, erro: "Escala não encontrada." };
     const atr = escala.atribuicoes || (escala.atribuicoes = {});
     if (!atr[equipeId]) atr[equipeId] = {};
+    const atrSemEsta = { ...atr[equipeId], [funcaoId]: [] };
 
     for (const id of novosIds) {
       const d = state.diaconos.find((x) => x.id === id);
       if (!d) return { ok: false, erro: "Diácono não encontrado." };
-      if (!candidatoValido(state, d, data, funcaoId, new Set())) {
+      if (
+        !candidatoValido(state, d, data, funcaoId, new Set(), {
+          atribuicoesHoje: atrSemEsta,
+        })
+      ) {
+        const ja = funcoesDoDiaconoNasAtribuicoes(atrSemEsta, d.id);
+        if (conflitaComFuncoesJaEscaladas(state, funcaoId, ja)) {
+          const outra = [...ja].find((x) => funcoesSaoIncompativeis(state, funcaoId, x));
+          const nomeOutra = getFuncao(state, outra)?.nome || outra;
+          const nomeFn = getFuncao(state, funcaoId)?.nome || funcaoId;
+          return {
+            ok: false,
+            erro: `${d.nome} não pode acumular ${nomeFn} com ${nomeOutra} no mesmo culto (regra em Configurações).`,
+          };
+        }
         return {
           ok: false,
           erro: `${d.nome} não pode assumir esta função nesta data (restrição, horário ou permissão).`,
@@ -1154,6 +1232,7 @@ window.DiaconiaEngine = (() => {
           !candidatoValido(state, d, data, fid, noDia, {
             permitirReuso: true,
             jaNaFuncao: new Set(ids),
+            atribuicoesHoje: limpas,
           })
         ) {
           const info = infoCasal(state, d.id);
@@ -1161,6 +1240,15 @@ window.DiaconiaEngine = (() => {
             return {
               ok: false,
               erro: `${d.nome} não pode servir neste culto junto com o cônjuge (casal marcado para não servir juntos na diaconia).`,
+            };
+          }
+          const ja = funcoesDoDiaconoNasAtribuicoes(limpas, d.id);
+          if (conflitaComFuncoesJaEscaladas(state, fid, ja)) {
+            const outra = [...ja].find((x) => funcoesSaoIncompativeis(state, fid, x));
+            const nomeOutra = getFuncao(state, outra)?.nome || outra;
+            return {
+              ok: false,
+              erro: `${d.nome} não pode acumular ${funcao.nome} com ${nomeOutra} no mesmo culto (regra em Configurações).`,
             };
           }
           return {
@@ -1205,26 +1293,28 @@ window.DiaconiaEngine = (() => {
     return { ok: true, escala, problemas };
   }
 
-  /** Escalas afetadas por restrição nova */
+  /** Escalas afetadas por restrição nova (suporta período data…dataFim). */
   function escalasAfetadasPorRestricao(state, restricao) {
-    const esc = state.escalas[restricao.data];
-    if (!esc || !esc.atribuicoes) return [];
     const afetadas = [];
-    for (const [eqId, funcoes] of Object.entries(esc.atribuicoes)) {
-      for (const [fid, ids] of Object.entries(funcoes)) {
-        if (!(ids || []).includes(restricao.diaconoId)) continue;
-        if (restricao.tipo === "indisponivel") {
-          afetadas.push({ data: restricao.data, equipeId: eqId, funcaoId: fid });
-        } else if (restricao.tipo === "funcao" && restricao.funcaoId === fid) {
-          afetadas.push({ data: restricao.data, equipeId: eqId, funcaoId: fid });
-        } else if (restricao.tipo === "horario") {
-          const funcao = getFuncao(state, fid);
-          if (
-            restricao.horarioChegada &&
-            funcao &&
-            !Cal().horarioCompativel(restricao.horarioChegada, funcao.horario)
-          ) {
-            afetadas.push({ data: restricao.data, equipeId: eqId, funcaoId: fid });
+    for (const data of datasDaRestricao(restricao)) {
+      const esc = state.escalas[data];
+      if (!esc || !esc.atribuicoes) continue;
+      for (const [eqId, funcoes] of Object.entries(esc.atribuicoes)) {
+        for (const [fid, ids] of Object.entries(funcoes)) {
+          if (!(ids || []).includes(restricao.diaconoId)) continue;
+          if (restricao.tipo === "indisponivel") {
+            afetadas.push({ data, equipeId: eqId, funcaoId: fid });
+          } else if (restricao.tipo === "funcao" && restricao.funcaoId === fid) {
+            afetadas.push({ data, equipeId: eqId, funcaoId: fid });
+          } else if (restricao.tipo === "horario") {
+            const funcao = getFuncao(state, fid);
+            if (
+              restricao.horarioChegada &&
+              funcao &&
+              !Cal().horarioCompativel(restricao.horarioChegada, funcao.horario)
+            ) {
+              afetadas.push({ data, equipeId: eqId, funcaoId: fid });
+            }
           }
         }
       }
@@ -1278,20 +1368,38 @@ window.DiaconiaEngine = (() => {
     return participacoesNaData(state, diaconoId, data).length > 0;
   }
 
-  function proximaEscala(state, diaconoId) {
+  /** Datas futuras em que o diácono está escalado, com todas as funções do dia. */
+  function proximasEscalasDiacono(state, diaconoId) {
     const hoje = Cal().hojeISO();
-    const todas = Object.values(state.escalas).sort((a, b) => a.data.localeCompare(b.data));
+    const out = [];
+    const todas = Object.values(state.escalas || {}).sort((a, b) => a.data.localeCompare(b.data));
     for (const esc of todas) {
       if (esc.data < hoje) continue;
-      for (const [eqId, funcoes] of Object.entries(esc.atribuicoes || {})) {
-        for (const [fid, ids] of Object.entries(funcoes)) {
-          if ((ids || []).includes(diaconoId)) {
-            return { data: esc.data, escala: esc, equipeId: eqId, funcaoId: fid, colegas: (ids || []).filter((i) => i !== diaconoId) };
-          }
-        }
-      }
+      const partes = participacoesNaData(state, diaconoId, esc.data);
+      if (!partes.length) continue;
+      partes.sort((a, b) => {
+        const ha = getFuncao(state, a.funcaoId)?.horario || "";
+        const hb = getFuncao(state, b.funcaoId)?.horario || "";
+        return ha.localeCompare(hb) || String(a.funcaoId).localeCompare(String(b.funcaoId));
+      });
+      out.push({ data: esc.data, escala: esc, partes });
     }
-    return null;
+    return out;
+  }
+
+  function proximaEscala(state, diaconoId) {
+    const lista = proximasEscalasDiacono(state, diaconoId);
+    if (!lista.length) return null;
+    const first = lista[0];
+    const p0 = first.partes[0];
+    return {
+      data: first.data,
+      escala: first.escala,
+      equipeId: p0.equipeId,
+      funcaoId: p0.funcaoId,
+      colegas: p0.colegas,
+      partes: first.partes,
+    };
   }
 
   function resumoMesDiacono(state, diaconoId, ano, mes) {
@@ -1432,11 +1540,16 @@ window.DiaconiaEngine = (() => {
     diaconosDaEquipe,
     restricoesAtivas,
     restricoesPara,
+    restricaoCobreData,
+    datasDaRestricao,
     podeParticipar,
     funcoesBloqueadas,
     chegadaMaxima,
     candidatoValido,
     candidatosParaFuncao,
+    funcoesDoDiaconoNasAtribuicoes,
+    funcoesSaoIncompativeis,
+    conflitaComFuncoesJaEscaladas,
     exigeCasal,
     funcoesExigemCasalIds,
     parCasalValido,
@@ -1470,6 +1583,7 @@ window.DiaconiaEngine = (() => {
     participacoesNaData,
     diaconoEstaEscaladoNaData,
     proximaEscala,
+    proximasEscalasDiacono,
     resumoMesDiacono,
     casaisAtivos,
     infoCasal,
