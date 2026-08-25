@@ -136,15 +136,22 @@ window.DiaconiaEscalaModal = (() => {
           ? Engine().funcoesDaEscala(state, esc)
           : esc.funcoesIds || [])) {
           const f = Engine().getFuncao(state, fid);
-          const qtd = f?.qtdPorEquipe || 1;
+          const qtd =
+            typeof Engine().qtdFuncaoNaEscala === "function"
+              ? Engine().qtdFuncaoNaEscala(state, esc, fid)
+              : f?.qtdPorEquipe || 1;
           const ids = (esc.atribuicoes?.[eqId]?.[fid] || []).slice(0, qtd);
           const isMine = diaconoId && ids.includes(diaconoId);
           const nomes = ids.map((id) => UI().nomeDiacono(state, id)).join(" + ") || "—";
+          const qtdHint =
+            f && qtd !== (f.qtdPorEquipe || 1)
+              ? ` <span class="muted" style="font-size:11px">(${qtd} neste culto)</span>`
+              : "";
 
           html += `
           <div class="funcao-row ${isMine ? "mine" : ""}" data-fid="${fid}" data-eq="${eqId}">
             <div>
-              <strong>${UI().esc((f?.emoji || "") + " " + (f?.nome || fid))}</strong>
+              <strong>${UI().esc((f?.emoji || "") + " " + (f?.nome || fid))}</strong>${qtdHint}
               ${isMine ? `<div class="you-tag">VOCÊ</div>` : ""}
             </div>
             <div class="muted">${UI().esc(f?.horario || "")}</div>
@@ -295,6 +302,7 @@ window.DiaconiaEscalaModal = (() => {
       .join("");
 
     const selecionadas = new Set(esc.funcoesIds || state.funcoesPadraoCulto || []);
+    const qtdDia = esc.funcoesQtd || {};
     const labelRec = (r) => {
       const map = {
         sempre: "todo culto",
@@ -311,15 +319,24 @@ window.DiaconiaEscalaModal = (() => {
       .map((f) => {
         const hint =
           f.recorrencia && f.recorrencia !== "sempre"
-            ? ` <span class="muted">(${UI().esc(labelRec(f.recorrencia))})</span>`
+            ? ` <span class="muted fn-dia-hint">(${UI().esc(labelRec(f.recorrencia))})</span>`
             : "";
-        return `<label><input type="checkbox" name="fn-dia" value="${f.id}" ${selecionadas.has(f.id) ? "checked" : ""}/> ${UI().esc(f.emoji + " " + f.nome)}${hint}</label>`;
+        const qtdPadrao = f.qtdPorEquipe || 1;
+        const qtdAtual = qtdDia[f.id] != null ? qtdDia[f.id] : qtdPadrao;
+        const checked = selecionadas.has(f.id);
+        return `<div class="fn-dia-row">
+          <label class="fn-dia-label">
+            <input type="checkbox" name="fn-dia" value="${f.id}" ${checked ? "checked" : ""} data-fn-check="${f.id}"/>
+            <span class="fn-dia-name">${UI().esc(f.emoji + " " + f.nome)}${hint}</span>
+          </label>
+          <input type="number" class="fn-dia-qtd" data-fn-qtd="${f.id}" min="1" step="1" value="${qtdAtual}" title="Qtd neste culto (padrão ${qtdPadrao})" aria-label="Quantidade de ${UI().esc(f.nome)}" ${checked ? "" : "disabled"}/>
+        </div>`;
       })
       .join("");
 
     UI().openModal(`
-      <h2>✏️ Editar data e equipe</h2>
-      <p class="muted">Altere o dia, a equipe e quais funções entram neste culto.</p>
+      <h2>Editar data e equipe</h2>
+      <p class="muted">Dia, equipe, funções e quantidade de pessoas <strong>só neste culto/evento</strong>.</p>
       <label class="field"><span>Data</span><input type="date" id="ed-data" value="${UI().esc(data)}"/></label>
       <label class="field"><span>Nome</span><input id="ed-nome" value="${UI().esc(esc.nome || "")}"/></label>
       <label class="field"><span>Horário</span><input id="ed-hora" value="${UI().esc(esc.horario || "18:00")}"/></label>
@@ -332,10 +349,13 @@ window.DiaconiaEscalaModal = (() => {
       </label>
       <p><strong>Equipe responsável do dia</strong></p>
       <div class="radio-list">${eqs}</div>
-      <p><strong>Funções deste culto</strong></p>
-      <p class="muted" style="font-size:12px;margin-top:-4px">Desmarque o que não precisa neste dia (ex.: Mesa de Ceia fora do 1º domingo, ou o contrário).</p>
-      <div class="check-list" style="max-height:160px;overflow:auto">${funs}</div>
-      <div class="alert alert-warn">Se mudar a equipe, as atribuições deste dia serão limpas (gere a escala de novo). Mudar funções remove as pessoas das funções desmarcadas.</div>
+      <div class="fn-dia-head">
+        <strong>Funções deste culto</strong>
+        <span class="muted">Qtd</span>
+      </div>
+      <p class="muted fn-dia-sub">Quantidade só neste dia. Ex.: Segurança 2 no culto e 4 no evento.</p>
+      <div class="fn-dia-list">${funs}</div>
+      <div class="alert alert-warn">Mudar a equipe limpa as atribuições (gere de novo). Desmarcar função remove as pessoas dela.</div>
       <div class="modal-actions">
         <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
         <button class="btn btn-accent" data-act="salvar">Salvar</button>
@@ -343,6 +363,12 @@ window.DiaconiaEscalaModal = (() => {
     `);
 
     const m = document.getElementById("modal-root");
+    m.querySelectorAll("[data-fn-check]").forEach((chk) => {
+      chk.addEventListener("change", () => {
+        const q = m.querySelector(`[data-fn-qtd="${chk.value}"]`);
+        if (q) q.disabled = !chk.checked;
+      });
+    });
     m.addEventListener("click", (ev) => {
       const a = ev.target.closest("[data-act]")?.dataset.act;
       if (a === "cancel") {
@@ -359,6 +385,13 @@ window.DiaconiaEscalaModal = (() => {
       if (!equipeId) return UI().toast("Selecione a equipe.");
       if (!funcoesIds.length) return UI().toast("Selecione ao menos uma função.");
 
+      const funcoesQtd = {};
+      for (const fid of funcoesIds) {
+        const inp = m.querySelector(`[data-fn-qtd="${fid}"]`);
+        const n = Math.max(1, parseInt(inp?.value, 10) || 1);
+        funcoesQtd[fid] = n;
+      }
+
       const res = Engine().atualizarEscalaDia(state, data, {
         data: novaData,
         equipeId,
@@ -366,6 +399,7 @@ window.DiaconiaEscalaModal = (() => {
         horario: m.querySelector("#ed-hora").value.trim() || esc.horario,
         tipo: m.querySelector("#ed-tipo").value,
         funcoesIds,
+        funcoesQtd,
       });
 
       if (!res.ok) return UI().toast(res.erro);
@@ -427,7 +461,10 @@ window.DiaconiaEscalaModal = (() => {
       .map((fid) => {
         const f = Engine().getFuncao(state, fid);
         if (!f) return "";
-        const qtd = f.qtdPorEquipe || 1;
+        const qtd =
+          typeof Engine().qtdFuncaoNaEscala === "function"
+            ? Engine().qtdFuncaoNaEscala(state, esc, fid)
+            : f.qtdPorEquipe || 1;
         const ids = (atuais[fid] || []).slice(0, qtd);
         const selects = Array.from({ length: qtd }, (_, i) => {
           const val = ids[i] || "";
@@ -535,8 +572,12 @@ window.DiaconiaEscalaModal = (() => {
 
   function showAlterar(state, data, equipeId, funcaoId, onDone, onCancel) {
     const f = Engine().getFuncao(state, funcaoId);
-    const atuais = state.escalas[data]?.atribuicoes?.[equipeId]?.[funcaoId] || [];
-    const qtd = f?.qtdPorEquipe || 1;
+    const esc = state.escalas[data];
+    const atuais = esc?.atribuicoes?.[equipeId]?.[funcaoId] || [];
+    const qtd =
+      typeof Engine().qtdFuncaoNaEscala === "function"
+        ? Engine().qtdFuncaoNaEscala(state, esc, funcaoId)
+        : f?.qtdPorEquipe || 1;
     const candidatos = Engine().candidatosParaFuncao(state, data, equipeId, funcaoId);
 
     let opts = candidatos

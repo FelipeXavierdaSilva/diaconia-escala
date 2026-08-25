@@ -346,6 +346,7 @@ window.DiaconiaSeed = (() => {
       /** Uma equipe responsável por este dia (padrão do sistema) */
       equipesIds: equipesIds && equipesIds.length ? [...equipesIds] : ["eq01"],
       funcoesIds: funcoesIds?.length ? [...funcoesIds] : [...FUNCOES_PADRAO_CULTO],
+      funcoesQtd: {},
       status: "rascunho",
       atribuicoes: {},
       problemas: [],

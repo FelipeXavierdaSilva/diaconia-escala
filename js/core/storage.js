@@ -213,6 +213,7 @@ window.DiaconiaStorage = (() => {
     // Escalas: só entram no PDF as marcadas pelo botão Gerar escala
     for (const esc of Object.values(state.escalas || {})) {
       if (esc.gerada === undefined) esc.gerada = false;
+      if (!esc.funcoesQtd || typeof esc.funcoesQtd !== "object") esc.funcoesQtd = {};
     }
 
     // Usuários: WhatsApp no cadastro (normaliza 0 + DD)

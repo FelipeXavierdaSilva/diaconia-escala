@@ -1099,7 +1099,7 @@ window.DiaconiaEngine = (() => {
     // manter atribuição manual, só validar problemas
     const funcao = getFuncao(state, funcaoId);
     if (!funcao) return { ok: false, erro: "Função não encontrada." };
-    const qtd = Math.max(funcao.qtdPorEquipe || 1, exigeCasal(state, funcaoId) ? 2 : 1);
+    const qtd = qtdFuncaoNaEscala(state, escala, funcaoId);
     if (exigeCasal(state, funcaoId) && novosIds.length >= 2) {
       const v = validarParFuncaoCasal(state, funcaoId, novosIds);
       if (!v.ok) return { ok: false, erro: v.erro };
@@ -1139,7 +1139,7 @@ window.DiaconiaEngine = (() => {
     for (const fid of funcoesIds) {
       const funcao = getFuncao(state, fid);
       if (!funcao || funcao.ativo === false) continue;
-      const qtd = funcao.qtdPorEquipe || 1;
+      const qtd = qtdFuncaoNaEscala(state, escala, fid);
       const raw = (atribuicoesEq[fid] || []).filter(Boolean);
       const ids = [];
 
@@ -1355,6 +1355,29 @@ window.DiaconiaEngine = (() => {
       }
     }
 
+    if (payload.funcoesQtd && typeof payload.funcoesQtd === "object") {
+      if (!esc.funcoesQtd) esc.funcoesQtd = {};
+      const keep = new Set(esc.funcoesIds || []);
+      for (const [fid, raw] of Object.entries(payload.funcoesQtd)) {
+        if (!keep.has(fid)) continue;
+        const base = getFuncao(state, fid)?.qtdPorEquipe || 1;
+        const n = Math.max(1, parseInt(raw, 10) || base);
+        if (n === base) delete esc.funcoesQtd[fid];
+        else esc.funcoesQtd[fid] = n;
+      }
+      for (const fid of Object.keys(esc.funcoesQtd)) {
+        if (!keep.has(fid)) delete esc.funcoesQtd[fid];
+      }
+      // Corta atribuições se a qtd do dia diminuiu
+      for (const eq of Object.values(esc.atribuicoes || {})) {
+        for (const fid of Object.keys(eq || {})) {
+          const qtd = qtdFuncaoNaEscala(state, esc, fid);
+          if ((eq[fid] || []).length > qtd) eq[fid] = eq[fid].slice(0, qtd);
+        }
+      }
+      esc.status = statusEscala(esc, state);
+    }
+
     if (equipeMudou) {
       esc.equipesIds = [novaEquipe];
       esc.atribuicoes = {};
@@ -1402,6 +1425,7 @@ window.DiaconiaEngine = (() => {
     uid,
     shuffle,
     getFuncao,
+    qtdFuncaoNaEscala,
     getMinisterio,
     ministerioDoDiacono,
     conflitoHorarioMinisterio,
