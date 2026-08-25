@@ -3887,6 +3887,254 @@ window.DiaconiaViewsLider = (() => {
     });
   }
 
+  /* ——— Ocorrências (Operações) ——— */
+  function ocorrenciasAdmin(app) {
+    const { state } = ctx(app);
+    const sessao = ctx(app).sessao();
+    const Ocr = window.DiaconiaOcorrencias;
+    Ocr?.ensure?.(state);
+    const filtro = app.filtroOcrStatus || "";
+    const lista = Ocr.listar(state, { status: filtro || undefined, sessao });
+    const pend = (lista || []).filter((o) => o.status === "registrada" || o.status === "em_providencia").length;
+    const datas = Ocr.datasCultoOpcoes(state);
+    const hoje = Cal().hojeISO();
+    const dataPadrao = datas.find((d) => d <= hoje) || datas[0] || hoje;
+    const tiposOpts = (Ocr.TIPOS || [])
+      .map((t) => `<option value="${t.id}">${UI().esc(t.label)}</option>`)
+      .join("");
+    const datasOpts = datas.length
+      ? datas
+          .map(
+            (d) =>
+              `<option value="${d}" ${d === dataPadrao ? "selected" : ""}>${UI().esc(Cal().diaSemana(d) + " — " + Cal().formatBR(d))}</option>`
+          )
+          .join("")
+      : `<option value="${hoje}">${UI().esc(Cal().formatBR(hoje))}</option>`;
+
+    const rows = lista
+      .map((o) => {
+        const st = Ocr.statusInfo(o.status);
+        const vis = Ocr.visibilidadeInfo(o.visibilidade);
+        const prov = String(o.providencia || o.notaAdmin || "").trim();
+        return `<tr class="no-click">
+          <td>${UI().esc(Cal().formatBRCurto(o.data))}
+            <div class="muted" style="font-size:12px">${UI().esc(Cal().diaSemana(o.data))}</div>
+          </td>
+          <td><strong>${UI().esc(o.titulo)}</strong>
+            <div class="muted" style="font-size:12px">${UI().esc(Ocr.tipoLabel(o.tipo))} · Relatou: ${UI().esc(o.criadoPorNome || "—")} · ${UI().esc(vis.texto)}${
+              o.ocultarRelator !== false ? " · nome oculto da equipe" : ""
+            }</div>
+            ${prov ? `<div class="ocr-providencia-preview">${o.exporProvidencia ? "Visível aos diáconos" : "Só liderança"}: ${UI().esc(prov.slice(0, 80))}${prov.length > 80 ? "…" : ""}</div>` : ""}
+          </td>
+          <td><span class="badge badge-${st.tom}">${UI().esc(st.texto)}</span></td>
+          <td class="toolbar">
+            ${UI().btnIcon({ icon: "eye", label: "Abrir", variant: "ghost", attrs: { "data-act": "ver-ocr", "data-id": o.id } })}
+            ${UI().btnIcon({ icon: "trash", label: "Excluir", variant: "danger", attrs: { "data-act": "del-ocr", "data-id": o.id } })}
+          </td>
+        </tr>`;
+      })
+      .join("");
+
+    return `
+      <div class="topbar">
+        <div>
+          <h1>Ocorrências</h1>
+          <p class="sub">Relatos do culto feitos pelos diáconos em Meu serviço → Ocorrências. Atualize o status e as medidas. O nome de quem relatou e o que foi feito só vão para os demais se você autorizar.</p>
+        </div>
+        ${pend ? `<span class="badge badge-warn">${pend} em aberto</span>` : ""}
+      </div>
+
+      <div class="panel" style="margin-bottom:16px">
+        <h2 style="margin-top:0">Registrar ocorrência</h2>
+        <div class="grid grid-2">
+          <label class="field"><span>Data do culto</span>
+            <select id="ocr-data" class="select">${datasOpts}</select>
+          </label>
+          <label class="field"><span>Tipo</span>
+            <select id="ocr-tipo" class="select">${tiposOpts}</select>
+          </label>
+        </div>
+        <label class="field"><span>Título curto</span>
+          <input id="ocr-titulo" class="input" maxlength="120" placeholder="Ex.: Portão emperrado / ausência no gazofilácio"/>
+        </label>
+        <label class="field"><span>O que aconteceu?</span>
+          <textarea id="ocr-desc" class="textarea" rows="3" placeholder="Fato, horário aproximado e o que já foi feito no culto."></textarea>
+        </label>
+        <label class="field field-check" style="margin-top:8px">
+          <input type="checkbox" id="ocr-expor"/>
+          <span>Expor à equipe diaconal<br/>
+            <span class="muted" style="font-size:12px;font-weight:400">Sem marcar, só a liderança e quem relatou veem.</span>
+          </span>
+        </label>
+        <button type="button" class="btn btn-accent" id="btn-enviar-ocr" style="margin-top:12px">Registrar</button>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Todas as ocorrências</h2>
+          <label class="field" style="margin:0;min-width:160px"><span class="muted" style="font-size:12px">Status</span>
+            <select id="filtro-ocr-st" class="select">
+              <option value="">Todos</option>
+              <option value="registrada" ${filtro === "registrada" ? "selected" : ""}>Registrada</option>
+              <option value="em_providencia" ${filtro === "em_providencia" ? "selected" : ""}>Em providência</option>
+              <option value="resolvida" ${filtro === "resolvida" ? "selected" : ""}>Resolvida</option>
+            </select>
+          </label>
+        </div>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Culto</th><th>Ocorrência</th><th>Status</th><th></th></tr></thead>
+            <tbody>${
+              rows ||
+              `<tr class="no-click"><td colspan="4" class="empty">Nenhuma ocorrência. Os diáconos relatam em Meu serviço → Ocorrências; a liderança também pode registrar acima.</td></tr>`
+            }</tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+
+  function abrirDetalheOcorrenciaAdmin(app, o) {
+    const { state } = ctx(app);
+    const Ocr = window.DiaconiaOcorrencias;
+    const sessao = ctx(app).sessao();
+    Ocr.marcarVisualizacao(state, o.id, sessao);
+    app.save();
+
+    const st = Ocr.statusInfo(o.status);
+    const vis = Ocr.visibilidadeInfo(o.visibilidade);
+    const providencia = String(o.providencia || o.notaAdmin || "").trim();
+    const vistos = (o.visualizadoPor || [])
+      .map((uid) => {
+        const u = (state.usuarios || []).find((x) => x.id === uid);
+        return u?.nome || uid;
+      })
+      .filter(Boolean);
+
+    UI().openModal(`
+      <h2>${UI().esc(o.titulo)}</h2>
+      <p class="muted" style="margin-top:0">
+        ${UI().esc(Cal().diaSemana(o.data) + " — " + Cal().formatBR(o.data))} ·
+        ${UI().esc(Ocr.tipoLabel(o.tipo))} · Relatou: <strong>${UI().esc(o.criadoPorNome || "—")}</strong> ·
+        <span class="badge badge-${st.tom}">${UI().esc(st.texto)}</span> ·
+        <span class="badge badge-${vis.tom}">${UI().esc(vis.texto)}</span>
+      </p>
+      <p style="white-space:pre-wrap">${UI().esc(o.descricao)}</p>
+      ${
+        vistos.length
+          ? `<p class="muted" style="font-size:12px">Já viram: ${UI().esc(vistos.join(", "))}</p>`
+          : ""
+      }
+      <label class="field"><span>Status</span>
+        <select id="ocr-st" class="select">
+          <option value="registrada" ${o.status === "registrada" ? "selected" : ""}>Registrada</option>
+          <option value="em_providencia" ${o.status === "em_providencia" ? "selected" : ""}>Em providência</option>
+          <option value="resolvida" ${o.status === "resolvida" ? "selected" : ""}>Resolvida</option>
+        </select>
+      </label>
+      <label class="field"><span>O que foi realizado</span>
+        <textarea id="ocr-nota" class="textarea" rows="3" placeholder="Providência. Só aparece para os diáconos se você marcar abaixo.">${UI().esc(providencia)}</textarea>
+      </label>
+      <label class="field field-check">
+        <input type="checkbox" id="ocr-expor-prov" ${o.exporProvidencia ? "checked" : ""}/>
+        <span>Mostrar aos diáconos o que foi realizado<br/>
+          <span class="muted" style="font-size:12px;font-weight:400">Relatante e quem já viu a ocorrência. Sem marcar, eles só veem o status (ex.: resolvida).</span>
+        </span>
+      </label>
+      <label class="field"><span>Quem pode ver esta ocorrência</span>
+        <select id="ocr-vis" class="select">
+          <option value="privada" ${o.visibilidade !== "equipe" ? "selected" : ""}>Só liderança e quem relatou</option>
+          <option value="equipe" ${o.visibilidade === "equipe" ? "selected" : ""}>Toda a equipe (o grupo)</option>
+        </select>
+      </label>
+      <label class="field field-check">
+        <input type="checkbox" id="ocr-mostrar-relator" ${o.ocultarRelator === false ? "checked" : ""}/>
+        <span>Mostrar quem relatou para os outros diáconos<br/>
+          <span class="muted" style="font-size:12px;font-weight:400">Por padrão o nome fica só com a liderança.</span>
+        </span>
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" data-act="cancel">Cancelar</button>
+        <button type="button" class="btn btn-accent" data-act="save">Salvar</button>
+      </div>
+    `);
+    const m = document.getElementById("modal-root");
+    m.addEventListener("click", (e) => {
+      const act = e.target.closest("[data-act]")?.dataset.act;
+      if (act === "cancel") return UI().closeModal();
+      if (act !== "save") return;
+      const res = Ocr.atualizar(
+        state,
+        o.id,
+        {
+          status: m.querySelector("#ocr-st")?.value || "registrada",
+          providencia: m.querySelector("#ocr-nota")?.value || "",
+          visibilidade: m.querySelector("#ocr-vis")?.value || "privada",
+          exporProvidencia: !!m.querySelector("#ocr-expor-prov")?.checked,
+          ocultarRelator: !m.querySelector("#ocr-mostrar-relator")?.checked,
+        },
+        sessao
+      );
+      if (!res.ok) return UI().toast(res.erro);
+      UI().closeModal();
+      app.save();
+      app.render();
+      UI().toast("Ocorrência atualizada. Relatante e quem já viu foram avisados se o status mudou.");
+    });
+  }
+
+  function bindOcorrenciasAdmin(app, root) {
+    const { state } = ctx(app);
+    const sessao = ctx(app).sessao();
+    const Ocr = window.DiaconiaOcorrencias;
+
+    root.querySelector("#filtro-ocr-st")?.addEventListener("change", (e) => {
+      app.filtroOcrStatus = e.target.value || "";
+      app.render();
+    });
+
+    root.querySelector("#btn-enviar-ocr")?.addEventListener("click", () => {
+      const expor = !!root.querySelector("#ocr-expor")?.checked;
+      const res = Ocr.criar(
+        state,
+        {
+          data: root.querySelector("#ocr-data")?.value,
+          tipo: root.querySelector("#ocr-tipo")?.value,
+          titulo: root.querySelector("#ocr-titulo")?.value,
+          descricao: root.querySelector("#ocr-desc")?.value,
+          visibilidade: expor ? "equipe" : "privada",
+        },
+        sessao
+      );
+      if (!res.ok) return UI().toast(res.erro);
+      app.save();
+      app.render();
+      UI().toast(expor ? "Ocorrência registrada e visível à equipe." : "Ocorrência registrada (só liderança e relator).");
+    });
+
+    root.querySelectorAll('[data-act="del-ocr"]').forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const o = (state.ocorrencias || []).find((x) => x.id === btn.dataset.id);
+        if (!o) return;
+        const ok = await UI().confirmDelete({
+          itemLabel: `a ocorrência <strong>${UI().esc(o.titulo)}</strong>`,
+        });
+        if (!ok) return;
+        const res = Ocr.excluir(state, o.id, sessao);
+        if (!res.ok) return UI().toast(res.erro);
+        app.save();
+        app.render();
+        UI().toast("Ocorrência excluída.");
+      });
+    });
+
+    root.querySelectorAll('[data-act="ver-ocr"]').forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const o = (state.ocorrencias || []).find((x) => x.id === btn.dataset.id);
+        if (o) abrirDetalheOcorrenciaAdmin(app, o);
+      });
+    });
+  }
+
   const pages = {
     escalas: { render: escalas, bind: bindEscalas },
     diaconos: { render: diaconos, bind: bindDiaconos },
@@ -3896,10 +4144,8 @@ window.DiaconiaViewsLider = (() => {
     restricoes: { render: restricoes, bind: bindRestricoes },
     trocas: { render: trocas, bind: bindTrocas },
     comunicados: { render: comunicados, bind: bindComunicados },
-    ocorrencias: {
-      render: (app) => window.DiaconiaViewsDiacono.pages.ocorrencias.render(app),
-      bind: (app, root) => window.DiaconiaViewsDiacono.pages.ocorrencias.bind?.(app, root),
-    },
+    ocorrencias: { render: ocorrenciasAdmin, bind: bindOcorrenciasAdmin },
+    ocorrenciasGestao: { render: ocorrenciasAdmin, bind: bindOcorrenciasAdmin },
     usuarios: { render: usuarios, bind: bindUsuarios },
     historico: { render: historico, bind: bindHistorico },
     erros: { render: errosAdmin, bind: bindErrosAdmin },

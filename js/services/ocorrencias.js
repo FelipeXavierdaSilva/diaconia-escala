@@ -49,6 +49,8 @@ window.DiaconiaOcorrencias = (() => {
     if (!Array.isArray(o.visualizadoPor)) o.visualizadoPor = [];
     if (o.notaAdmin == null) o.notaAdmin = "";
     if (o.providencia == null) o.providencia = o.notaAdmin || "";
+    if (o.ocultarRelator !== false) o.ocultarRelator = true;
+    if (o.exporProvidencia !== true) o.exporProvidencia = false;
     return o;
   }
 
@@ -74,7 +76,32 @@ window.DiaconiaOcorrencias = (() => {
     normalizar(o);
     if (isLider(sessao)) return true;
     if (o.criadoPor && o.criadoPor === sessao.usuarioId) return true;
-    return o.visibilidade === "equipe";
+    if (o.visibilidade === "equipe") return true;
+    if ((o.visualizadoPor || []).includes(sessao.usuarioId)) return true;
+    return false;
+  }
+
+  /** Nome de quem relatou — outros só veem se a liderança autorizar. */
+  function nomeRelatorPara(o, sessao) {
+    if (!o) return "—";
+    normalizar(o);
+    if (isLider(sessao)) return o.criadoPorNome || "—";
+    if (o.criadoPor && o.criadoPor === sessao?.usuarioId) return o.criadoPorNome || "Você";
+    if (o.ocultarRelator !== false) return "Um diácono";
+    return o.criadoPorNome || "Um diácono";
+  }
+
+  function podeVerProvidencia(o, sessao) {
+    if (!o || !sessao) return false;
+    normalizar(o);
+    if (isLider(sessao)) return true;
+    if (!podeVer(o, sessao)) return false;
+    if (o.criadoPor && o.criadoPor === sessao.usuarioId) return true;
+    return o.exporProvidencia === true && String(o.providencia || o.notaAdmin || "").trim().length > 0;
+  }
+
+  function pendentesAdmin(state) {
+    return ensure(state).filter((o) => o.status === "registrada" || o.status === "em_providencia");
   }
 
   function datasCultoOpcoes(state, { limite = 24 } = {}) {
@@ -100,6 +127,10 @@ window.DiaconiaOcorrencias = (() => {
     }
 
     const visibilidade = payload.visibilidade === "equipe" || payload.exporEquipe === true ? "equipe" : "privada";
+    const providencia = String(payload.providencia || payload.notaAdmin || "").trim();
+    let status = "registrada";
+    if (payload.resolvida === true || payload.status === "resolvida") status = "resolvida";
+    else if (payload.status === "em_providencia") status = "em_providencia";
 
     const item = {
       id: Engine().uid("ocr"),
@@ -107,15 +138,17 @@ window.DiaconiaOcorrencias = (() => {
       tipo: payload.tipo || "observacao",
       titulo,
       descricao,
-      status: "registrada",
+      status,
       visibilidade,
+      ocultarRelator: payload.ocultarRelator !== false,
+      exporProvidencia: payload.exporProvidencia === true,
       criadoEm: new Date().toISOString(),
       criadoPor: sessao?.usuarioId || null,
       criadoPorNome: sessao?.nome || "Usuário",
       criadoPorPapel: sessao?.papel || null,
       diaconoId: sessao?.diaconoId || null,
-      notaAdmin: "",
-      providencia: "",
+      notaAdmin: providencia,
+      providencia,
       visualizadoPor: sessao?.usuarioId ? [sessao.usuarioId] : [],
     };
 
@@ -135,9 +168,9 @@ window.DiaconiaOcorrencias = (() => {
       Hist().notify(state, {
         usuarioId: u.id,
         titulo: "Nova ocorrência no culto",
-        corpo: `${sessao?.nome || "Alguém"} registrou em ${Cal().formatBR?.(data) || data}: ${titulo}${
+        corpo: `Nova ocorrência em ${Cal().formatBR?.(data) || data}: ${titulo}${
           visibilidade === "equipe" ? " (visível à equipe)" : " (só liderança)"
-        }`,
+        } — relatada por ${sessao?.nome || "alguém"}`,
         link: "?ir=ocorrencias",
         meta: { tipo: "ocorrencia_culto", ocorrenciaId: item.id },
       });
@@ -150,7 +183,7 @@ window.DiaconiaOcorrencias = (() => {
         Hist().notify(state, {
           usuarioId: u.id,
           titulo: "Ocorrência compartilhada",
-          corpo: `${sessao?.nome || "Alguém"} compartilhou com a equipe: ${titulo} (${Cal().formatBR?.(data) || data})`,
+          corpo: `Uma ocorrência do culto ${Cal().formatBR?.(data) || data} foi compartilhada com a equipe: ${titulo}`,
           link: "?ir=ocorrencias",
           meta: { tipo: "ocorrencia_culto", ocorrenciaId: item.id },
         });
@@ -192,6 +225,7 @@ window.DiaconiaOcorrencias = (() => {
       status: o.status,
       providencia: String(o.providencia || o.notaAdmin || "").trim(),
       visibilidade: o.visibilidade,
+      exporProvidencia: !!o.exporProvidencia,
     };
 
     const soLider = isLider(sessao);
@@ -215,9 +249,27 @@ window.DiaconiaOcorrencias = (() => {
       if (patch.visibilidade !== undefined) {
         o.visibilidade = patch.visibilidade === "equipe" ? "equipe" : "privada";
       }
+      if (patch.ocultarRelator !== undefined) {
+        o.ocultarRelator = patch.ocultarRelator !== false;
+      }
+      if (patch.exporProvidencia !== undefined) {
+        o.exporProvidencia = patch.exporProvidencia === true;
+      }
     } else if (ehDono) {
       if (patch.visibilidade !== undefined) {
         o.visibilidade = patch.visibilidade === "equipe" ? "equipe" : "privada";
+      }
+      if (patch.providencia !== undefined || patch.notaAdmin !== undefined) {
+        const txt = String(patch.providencia ?? patch.notaAdmin ?? "").trim();
+        o.providencia = txt;
+        o.notaAdmin = txt;
+      }
+      if (patch.status !== undefined) {
+        const st = STATUS_LEGACY[patch.status] || patch.status;
+        if (st !== "registrada" && st !== "resolvida" && st !== "em_providencia") {
+          return { ok: false, erro: "Status inválido." };
+        }
+        o.status = st;
       }
     } else {
       return { ok: false, erro: "Sem permissão para editar." };
@@ -236,12 +288,15 @@ window.DiaconiaOcorrencias = (() => {
     const providenciaAgora = String(o.providencia || "").trim();
     const mudouStatus = antes.status !== o.status;
     const mudouProvidencia = antes.providencia !== providenciaAgora;
+    const mudouExpor = antes.exporProvidencia !== !!o.exporProvidencia;
     const mudouVis = antes.visibilidade !== o.visibilidade;
 
-    if (soLider && (mudouStatus || mudouProvidencia)) {
+    if (soLider && (mudouStatus || mudouProvidencia || mudouExpor)) {
       const st = statusInfo(o.status);
       const corpoPartes = [`Status: ${st.texto}`];
-      if (providenciaAgora) corpoPartes.push(`Providência: ${providenciaAgora.slice(0, 160)}`);
+      if (o.exporProvidencia && providenciaAgora) {
+        corpoPartes.push(`O que foi feito: ${providenciaAgora.slice(0, 160)}`);
+      }
       for (const uid of destinatariosAtualizacao(state, o, sessao)) {
         Hist().notify(state, {
           usuarioId: uid,
@@ -261,7 +316,7 @@ window.DiaconiaOcorrencias = (() => {
         Hist().notify(state, {
           usuarioId: u.id,
           titulo: "Ocorrência compartilhada",
-          corpo: `${o.titulo} passou a ser visível para a equipe.`,
+          corpo: `Uma ocorrência passou a ser visível para a equipe: ${o.titulo}`,
           link: "?ir=ocorrencias",
           meta: { tipo: "ocorrencia_culto", ocorrenciaId: id },
         });
@@ -311,6 +366,9 @@ window.DiaconiaOcorrencias = (() => {
     statusInfo,
     visibilidadeInfo,
     podeVer,
+    nomeRelatorPara,
+    podeVerProvidencia,
+    pendentesAdmin,
     datasCultoOpcoes,
     criar,
     marcarVisualizacao,

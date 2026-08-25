@@ -5,7 +5,7 @@
 window.DiaconiaApp = (() => {
   const UI = window.DiaconiaUI;
 
-  const PAGINAS_SERVICO = new Set(["minha", "avisos", "conta"]);
+  const PAGINAS_SERVICO = new Set(["minha", "avisos", "conta", "ocorrencias"]);
 
   const app = {
     state: null,
@@ -94,11 +94,9 @@ window.DiaconiaApp = (() => {
         if (ir === "erros" && sessao.papel === "lider") {
           this.page = "erros";
         }
-        if (ir === "ocorrencias") {
-          const pode =
-            sessao.papel === "diacono" ||
-            sessao.papel === "lider";
-          if (pode) this.page = "ocorrencias";
+        if (ir === "ocorrencias" || ir === "ocorrenciasGestao") {
+          if (sessao.papel === "lider") this.page = "ocorrenciasGestao";
+          else if (sessao.papel === "diacono") this.page = "ocorrencias";
         }
         if (
           ir === "relatar" &&
@@ -117,6 +115,10 @@ window.DiaconiaApp = (() => {
 
     /** Páginas antigas do diácono → novas */
     normalizePage(page, isLider, naEscala) {
+      if (!isLider && (page === "ocorrenciasGestao" || page === "ocorrencias")) {
+        return "ocorrencias";
+      }
+      if (isLider && !naEscala && page === "ocorrencias") return "ocorrenciasGestao";
       if (isLider && naEscala && PAGINAS_SERVICO.has(page)) return page;
       if (isLider) return page;
       const map = {
@@ -182,8 +184,8 @@ window.DiaconiaApp = (() => {
         { id: "funcoes", label: "Funções" },
         { id: "restricoes", label: "Avisos" },
         { id: "trocas", label: "Troca / Cobrir" },
+        { id: "ocorrenciasGestao", label: "Ocorrências" },
         { id: "comunicados", label: "Comunicados" },
-        { id: "ocorrencias", label: "Ocorrências" },
         { sep: true, label: "Sistema" },
         { id: "erros", label: "Relatos de erro" },
         { id: "historico", label: "Histórico" },
@@ -209,7 +211,7 @@ window.DiaconiaApp = (() => {
         { id: "ocorrencias", label: "Ocorrências" },
         { id: "conta", label: "Minha conta" },
         { sep: true, label: "Gestão" },
-        ...this.navLiderBase().filter((x) => x.id !== "ocorrencias"),
+        ...this.navLiderBase(),
       ];
     },
 
@@ -266,18 +268,50 @@ window.DiaconiaApp = (() => {
         ? window.DiaconiaErrors?.abertos?.(this.state)?.length || 0
         : 0;
 
-      const navHtml = nav
-        .map((item) => {
-          if (item.sep) {
-            return `<div class="nav-sep">${UI.esc(item.label || "")}</div>`;
-          }
-          let label = item.label;
-          if (item.id === "restricoes" && pendGestao) label += ` (${pendGestao})`;
-          if (item.id === "avisos" && pendServico) label += ` (${pendServico})`;
-          if (item.id === "erros" && errosAbertos) label += ` (${errosAbertos})`;
-          return `<button class="nav-btn ${this.page === item.id ? "active" : ""}" data-page="${item.id}">${label}</button>`;
-        })
-        .join("");
+      const navParts = [];
+      let zoneBuf = [];
+      let zoneKind = null;
+      const flushZone = () => {
+        if (!zoneBuf.length) return;
+        if (zoneKind === "servico" || zoneKind === "gestao") {
+          navParts.push(
+            `<div class="nav-zone nav-zone-${zoneKind}" role="group" aria-label="${
+              zoneKind === "servico" ? "Meu serviço" : "Gestão"
+            }">${zoneBuf.join("")}</div>`
+          );
+        } else {
+          navParts.push(zoneBuf.join(""));
+        }
+        zoneBuf = [];
+      };
+      const pushItemHtml = (item) => {
+        if (item.sep) {
+          zoneBuf.push(`<div class="nav-sep">${UI.esc(item.label || "")}</div>`);
+          return;
+        }
+        let label = item.label;
+        if (item.id === "restricoes" && pendGestao) label += ` (${pendGestao})`;
+        if (item.id === "avisos" && pendServico) label += ` (${pendServico})`;
+        if (item.id === "erros" && errosAbertos) label += ` (${errosAbertos})`;
+        if (item.id === "ocorrenciasGestao") {
+          const n = window.DiaconiaOcorrencias?.pendentesAdmin?.(this.state)?.length || 0;
+          if (n) label += ` (${n})`;
+        }
+        zoneBuf.push(
+          `<button class="nav-btn ${this.page === item.id ? "active" : ""}" data-page="${item.id}">${label}</button>`
+        );
+      };
+      for (const item of nav) {
+        if (item.sep && (item.label === "Meu serviço" || item.label === "Gestão")) {
+          flushZone();
+          zoneKind = item.label === "Meu serviço" ? "servico" : "gestao";
+          pushItemHtml(item);
+          continue;
+        }
+        pushItemHtml(item);
+      }
+      flushZone();
+      const navHtml = navParts.join("");
 
       const papelLabel = isLider
         ? naEscala

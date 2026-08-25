@@ -141,6 +141,44 @@ state.ocorrencias.push(legacy);
 Ocr.ensure(state);
 assert("migra vista→em_providencia", legacy.status === "em_providencia");
 
+assert("relator oculto para outro", Ocr.nomeRelatorPara(pub.ocorrencia, outro) === "Um diácono");
+assert("relator visível para admin", Ocr.nomeRelatorPara(pub.ocorrencia, admin) === "Felipe");
+assert("relator visível para si", Ocr.nomeRelatorPara(priv.ocorrencia, relator) === "Felipe");
+assert("providência oculta por padrão", Ocr.podeVerProvidencia(pub.ocorrencia, outro) === false);
+assert("relator vê medidas da própria ocorrência", Ocr.podeVerProvidencia(pub.ocorrencia, relator) === true);
+
+const jaResolvida = Ocr.criar(
+  state,
+  {
+    data,
+    tipo: "material",
+    titulo: "Cadeira quebrada",
+    descricao: "Cadeira da fila da frente quebrou na entrada.",
+    providencia: "Retiramos a cadeira e isolamos o espaço.",
+    resolvida: true,
+  },
+  relator
+);
+assert("diácono registra já resolvida", jaResolvida.ok === true, jaResolvida.erro || "");
+assert("status resolvida no relato", jaResolvida.ocorrencia.status === "resolvida");
+assert("medidas salvas no relato", jaResolvida.ocorrencia.providencia.includes("Retiramos"));
+
+const resv = Ocr.atualizar(
+  state,
+  pub.ocorrencia.id,
+  { status: "resolvida", providencia: "Portão lubrificado.", exporProvidencia: true },
+  admin
+);
+assert("resolver ok", resv.ok === true, resv.erro || "");
+assert("status resolvida", resv.ocorrencia.status === "resolvida");
+assert("expor providência", resv.ocorrencia.exporProvidencia === true);
+assert("relator vê o que foi feito", Ocr.podeVerProvidencia(resv.ocorrencia, relator) === true);
+assert("quem viu vê o que foi feito", Ocr.podeVerProvidencia(resv.ocorrencia, outro) === true);
+
+const mostrar = Ocr.atualizar(state, pub.ocorrencia.id, { ocultarRelator: false }, admin);
+assert("admin pode expor relator", mostrar.ok && mostrar.ocorrencia.ocultarRelator === false);
+assert("outro passa a ver o nome", Ocr.nomeRelatorPara(pub.ocorrencia, outro) === "Felipe");
+
 const failed = results.filter((r) => !r.ok);
 for (const r of results) console.log(`${r.ok ? "OK" : "FAIL"}  ${r.name}${r.detail && !r.ok ? " — " + r.detail : ""}`);
 console.log(`\n${results.length - failed.length}/${results.length} ok`);
