@@ -366,6 +366,17 @@ code {
   font-weight: 600;
 }
 
+.nav-sep {
+  margin: 14px 8px 6px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+}
+
 .sidebar-foot {
   margin-top: auto;
   padding-top: 16px;
@@ -1188,6 +1199,12 @@ table.data tbody tr.no-click {
   align-items: center;
   gap: 6px;
   padding-right: 6px;
+}
+
+.chip-inactive {
+  opacity: 0.72;
+  background: color-mix(in srgb, var(--muted) 12%, #fff);
+  color: var(--ink-soft);
 }
 
 .chip-x {

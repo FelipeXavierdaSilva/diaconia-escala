@@ -5,6 +5,8 @@
 window.DiaconiaApp = (() => {
   const UI = window.DiaconiaUI;
 
+  const PAGINAS_SERVICO = new Set(["minha", "avisos", "conta"]);
+
   const app = {
     state: null,
     page: null,
@@ -29,6 +31,25 @@ window.DiaconiaApp = (() => {
       this.render();
     },
 
+    /** Mantém diaconoId/nome da sessão alinhados ao usuário (ex.: líder que entrou na escala). */
+    syncSessaoComUsuario() {
+      const s = window.DiaconiaAuth.sessao();
+      if (!s || !this.state) return s;
+      const u = (this.state.usuarios || []).find((x) => x.id === s.usuarioId);
+      if (!u) return s;
+      const patch = {};
+      if (u.nome && u.nome !== s.nome) patch.nome = u.nome;
+      if (u.papel && u.papel !== s.papel) patch.papel = u.papel;
+      const did = u.diaconoId || null;
+      if (did !== (s.diaconoId || null)) patch.diaconoId = did;
+      if (!Object.keys(patch).length) return s;
+      return window.DiaconiaAuth.atualizarSessao(patch) || s;
+    },
+
+    liderNaEscala(sessao) {
+      return sessao?.papel === "lider" && !!sessao?.diaconoId;
+    },
+
     async boot() {
       if (typeof window.DiaconiaStorage.getOrInitAsync === "function") {
         this.state = await window.DiaconiaStorage.getOrInitAsync();
@@ -48,7 +69,7 @@ window.DiaconiaApp = (() => {
         });
       }
 
-      const sessao = window.DiaconiaAuth.sessao();
+      const sessao = this.syncSessaoComUsuario();
       if (!sessao) {
         this.renderLogin();
         return;
@@ -64,7 +85,9 @@ window.DiaconiaApp = (() => {
         const params = new URLSearchParams(window.location.search);
         const ir = params.get("ir");
         if (!ir) return;
-        if (sessao.papel === "diacono" && (ir === "avisos" || ir === "trocas")) {
+        const podeAvisos =
+          sessao.papel === "diacono" || (sessao.papel === "lider" && sessao.diaconoId);
+        if (podeAvisos && (ir === "avisos" || ir === "trocas")) {
           this.page = "avisos";
         }
         params.delete("ir");
@@ -77,7 +100,8 @@ window.DiaconiaApp = (() => {
     },
 
     /** Páginas antigas do diácono → novas */
-    normalizePage(page, isLider) {
+    normalizePage(page, isLider, naEscala) {
+      if (isLider && naEscala && PAGINAS_SERVICO.has(page)) return page;
       if (isLider) return page;
       const map = {
         mes: "minha",
@@ -119,13 +143,14 @@ window.DiaconiaApp = (() => {
           err.classList.remove("hidden");
           return;
         }
+        this.syncSessaoComUsuario();
         this.page = res.sessao.papel === "lider" ? "escalas" : "minha";
-        this.applyDeepLink(res.sessao);
+        this.applyDeepLink(window.DiaconiaAuth.sessao() || res.sessao);
         this.render();
       });
     },
 
-    navLider() {
+    navLiderBase() {
       return [
         { id: "escalas", label: "📅 Escalas" },
         { id: "diaconos", label: "👥 Diáconos" },
@@ -145,6 +170,17 @@ window.DiaconiaApp = (() => {
         { id: "minha", label: "Minha escala" },
         { id: "avisos", label: "Avisos" },
         { id: "conta", label: "Minha conta" },
+      ];
+    },
+
+    /** Líder na escala: atalhos do próprio serviço + gestão. */
+    navLiderComServico() {
+      return [
+        { id: "minha", label: "🙏 Minha escala" },
+        { id: "avisos", label: "Meus avisos" },
+        { id: "conta", label: "Minha conta" },
+        { sep: true, label: "Gestão" },
+        ...this.navLiderBase(),
       ];
     },
 
@@ -169,8 +205,12 @@ window.DiaconiaApp = (() => {
       return unread + aceites;
     },
 
+    paginaDeServico(page) {
+      return PAGINAS_SERVICO.has(page);
+    },
+
     render() {
-      const sessao = window.DiaconiaAuth.sessao();
+      const sessao = this.syncSessaoComUsuario();
       if (typeof UI.closeModal === "function") UI.closeModal();
       if (!sessao) {
         this.renderLogin();
@@ -178,18 +218,39 @@ window.DiaconiaApp = (() => {
       }
 
       const isLider = sessao.papel === "lider";
-      this.page = this.normalizePage(this.page, isLider);
-      const nav = isLider ? this.navLider() : this.navDiacono();
-      const badgeN = isLider ? this.restricoesPendentes() : this.avisosPendentes();
+      const naEscala = this.liderNaEscala(sessao);
+      this.page = this.normalizePage(this.page, isLider, naEscala);
+
+      if (isLider && !naEscala && this.paginaDeServico(this.page)) {
+        this.page = "escalas";
+      }
+
+      const nav = isLider
+        ? naEscala
+          ? this.navLiderComServico()
+          : this.navLiderBase()
+        : this.navDiacono();
+
+      const pendGestao = isLider ? this.restricoesPendentes() : 0;
+      const pendServico = !isLider || naEscala ? this.avisosPendentes() : 0;
 
       const navHtml = nav
         .map((item) => {
+          if (item.sep) {
+            return `<div class="nav-sep">${UI.esc(item.label || "")}</div>`;
+          }
           let label = item.label;
-          if (isLider && item.id === "restricoes" && badgeN) label += ` (${badgeN})`;
-          if (!isLider && item.id === "avisos" && badgeN) label += ` (${badgeN})`;
+          if (item.id === "restricoes" && pendGestao) label += ` (${pendGestao})`;
+          if (item.id === "avisos" && pendServico) label += ` (${pendServico})`;
           return `<button class="nav-btn ${this.page === item.id ? "active" : ""}" data-page="${item.id}">${label}</button>`;
         })
         .join("");
+
+      const papelLabel = isLider
+        ? naEscala
+          ? "Liderança · na escala"
+          : "Liderança"
+        : "Diácono";
 
       const root = document.getElementById("app");
       root.innerHTML = `
@@ -202,7 +263,7 @@ window.DiaconiaApp = (() => {
             </div>
             ${navHtml}
             <div class="sidebar-foot">
-              <div class="user-chip">${UI.esc(sessao.nome)} · ${isLider ? "Liderança" : "Diácono"}</div>
+              <div class="user-chip">${UI.esc(sessao.nome)} · ${papelLabel}</div>
               <button class="nav-btn" id="btn-logout">Sair</button>
             </div>
           </aside>
@@ -227,9 +288,10 @@ window.DiaconiaApp = (() => {
       });
 
       const main = root.querySelector("#main");
-      const pack = isLider
-        ? window.DiaconiaViewsLider.pages[this.page]
-        : window.DiaconiaViewsDiacono.pages[this.page];
+      const usarVisaoDiacono = this.paginaDeServico(this.page) && (!isLider || naEscala);
+      const pack = usarVisaoDiacono
+        ? window.DiaconiaViewsDiacono.pages[this.page]
+        : window.DiaconiaViewsLider.pages[this.page];
 
       if (!pack) {
         main.innerHTML = `<div class="panel empty">Página não encontrada.</div>`;

@@ -202,6 +202,8 @@ window.DiaconiaStorage = (() => {
     for (const l of state.lideres || []) {
       if (l.usuarioId === undefined) l.usuarioId = null;
       if (l.whatsapp) l.whatsapp = normWa(l.whatsapp);
+      if (l.ativo === undefined) l.ativo = true;
+      if (l.apareceEmDiaconos === undefined) l.apareceEmDiaconos = true;
     }
     for (const u of state.usuarios || []) {
       if (u.papel !== "lider") continue;
@@ -218,6 +220,7 @@ window.DiaconiaStorage = (() => {
           nome: u.nome,
           whatsapp: wa,
           ativo: true,
+          apareceEmDiaconos: true,
         });
       } else {
         l.usuarioId = u.id;
@@ -232,6 +235,7 @@ window.DiaconiaStorage = (() => {
       if (d.funcaoDiaconatoId === undefined) d.funcaoDiaconatoId = "";
       if (d.whatsapp === undefined) d.whatsapp = "";
       else if (d.whatsapp) d.whatsapp = normWa(d.whatsapp);
+      if (d.ativo === undefined) d.ativo = true;
       if (d.restricaoPessoal === undefined) d.restricaoPessoal = "";
       if (d.casado === undefined) d.casado = false;
       if (d.conjugeNome === undefined) d.conjugeNome = "";

@@ -879,7 +879,7 @@ window.DiaconiaViewsDiacono = (() => {
       .join("");
 
     const outros = state.diaconos
-      .filter((d) => d.id !== did && d.ativo)
+      .filter((d) => d.id !== did && d.ativo !== false)
       .map((d) => {
         const eqPub = UI().nomeEquipePublico(state, d.equipeId);
         const wa = d.whatsapp ? "" : " · sem WhatsApp";

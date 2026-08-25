@@ -71,6 +71,7 @@ window.DiaconiaEngine = (() => {
   }
 
   function candidatoValido(state, diacono, data, funcaoId, usadosNoDia) {
+    if (!diacono || diacono.ativo === false) return false;
     if (!podeParticipar(state, diacono.id, data)) return false;
     if (usadosNoDia.has(diacono.id)) return false;
     if (!temFuncaoPermitida(diacono, funcaoId)) return false;

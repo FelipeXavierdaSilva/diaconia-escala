@@ -218,10 +218,10 @@ window.DiaconiaSeed = (() => {
   ];
 
   const lideres = [
-    { id: "l01", nome: "Líder 1", whatsapp: "5511999990001", ativo: true },
-    { id: "l02", nome: "Líder 2", whatsapp: "5511999990002", ativo: true },
-    { id: "l03", nome: "Líder 3", whatsapp: "5511999990003", ativo: true },
-    { id: "l04", nome: "Líder 4", whatsapp: "5511999990004", ativo: true },
+    { id: "l01", nome: "Líder 1", whatsapp: "5511999990001", ativo: true, apareceEmDiaconos: true },
+    { id: "l02", nome: "Líder 2", whatsapp: "5511999990002", ativo: true, apareceEmDiaconos: true },
+    { id: "l03", nome: "Líder 3", whatsapp: "5511999990003", ativo: true, apareceEmDiaconos: true },
+    { id: "l04", nome: "Líder 4", whatsapp: "5511999990004", ativo: true, apareceEmDiaconos: true },
   ];
 
   const usuarios = [

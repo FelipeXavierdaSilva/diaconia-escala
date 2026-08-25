@@ -103,13 +103,26 @@ window.DiaconiaViewsLider = (() => {
         nome: usuario.nome,
         whatsapp: wa,
         ativo: true,
+        /** Visível na aba Diáconos da liderança (quando tem perfil de escala) */
+        apareceEmDiaconos: true,
       };
       state.lideres.push(l);
     } else {
       l.nome = usuario.nome;
       l.whatsapp = wa;
       if (l.ativo === undefined) l.ativo = true;
+      if (l.apareceEmDiaconos === undefined) l.apareceEmDiaconos = true;
     }
+  }
+
+  function liderApareceNaAbaDiaconos(state, diaconoId) {
+    const u = (state.usuarios || []).find(
+      (x) => x.diaconoId === diaconoId && x.papel === "lider"
+    );
+    if (!u) return true;
+    const l = (state.lideres || []).find((x) => x.usuarioId === u.id);
+    if (!l) return true;
+    return l.apareceEmDiaconos !== false;
   }
 
   function removerLiderDeUsuario(state, usuarioId) {
@@ -154,23 +167,63 @@ window.DiaconiaViewsLider = (() => {
     return diacono;
   }
 
-  function garantirPerfilDiacono(state, usuario, { nome, whatsapp }, usuarioLogId) {
-    if (usuario.papel !== "diacono") {
-      usuario.diaconoId = null;
+  /**
+   * Remove o perfil de escala (diácono) mantendo a conta de usuário.
+   * Usado quando o líder desmarca “Entrar na escala”.
+   */
+  function removerPerfilEscalaMantendoUsuario(state, usuario) {
+    const diaconoId = usuario?.diaconoId;
+    if (!diaconoId) return;
+    usuario.diaconoId = null;
+    state.diaconos = (state.diaconos || []).filter((d) => d.id !== diaconoId);
+    state.restricoes = (state.restricoes || []).filter((r) => r.diaconoId !== diaconoId);
+    state.casais = (state.casais || []).filter(
+      (c) => c.diaconoIdA !== diaconoId && c.diaconoIdB !== diaconoId
+    );
+    state.trocas = (state.trocas || []).filter(
+      (t) => t.deDiaconoId !== diaconoId && t.paraDiaconoId !== diaconoId
+    );
+    for (const esc of Object.values(state.escalas || {})) {
+      for (const eq of Object.values(esc.atribuicoes || {})) {
+        for (const fid of Object.keys(eq || {})) {
+          eq[fid] = (eq[fid] || []).filter((id) => id !== diaconoId);
+        }
+      }
+      if (typeof Engine().statusEscala === "function") {
+        esc.status = Engine().statusEscala(esc, state);
+      }
+    }
+  }
+
+  /**
+   * Garante perfil em Diáconos para quem entra na escala.
+   * Diácono: sempre. Líder: só se entrarNaEscala === true.
+   */
+  function garantirPerfilDiacono(state, usuario, { nome, whatsapp, entrarNaEscala }, usuarioLogId) {
+    const naEscala =
+      usuario.papel === "diacono" || (usuario.papel === "lider" && entrarNaEscala === true);
+
+    if (!naEscala) {
+      if (usuario.diaconoId) removerPerfilEscalaMantendoUsuario(state, usuario);
       return null;
     }
+
     let d = usuario.diaconoId ? state.diaconos.find((x) => x.id === usuario.diaconoId) : null;
     if (!d) {
       d = criarDiaconoMinimo(state, { nome, whatsapp });
       usuario.diaconoId = d.id;
       window.DiaconiaHistory.add(state, {
         tipo: "diacono",
-        mensagem: `Perfil de diácono criado para ${nome} — configure equipe e funções em Diáconos.`,
+        mensagem:
+          usuario.papel === "lider"
+            ? `Líder ${nome} incluído na escala — configure equipe e funções em Diáconos.`
+            : `Perfil de diácono criado para ${nome} — configure equipe e funções em Diáconos.`,
         usuarioId: usuarioLogId,
       });
     } else {
       d.nome = nome;
       if (whatsapp) d.whatsapp = whatsapp;
+      if (d.ativo === undefined) d.ativo = true;
     }
     return d;
   }
@@ -587,7 +640,7 @@ window.DiaconiaViewsLider = (() => {
     const busca = app.filtroDiaconoBusca || "";
     const ordem = app.filtroDiaconoOrdem || "az";
 
-    let lista = [...state.diaconos];
+    let lista = [...state.diaconos].filter((d) => liderApareceNaAbaDiaconos(state, d.id));
     lista.sort((a, b) =>
       a.nome.localeCompare(b.nome, "pt-BR", { sensitivity: "base" })
     );
@@ -630,6 +683,7 @@ window.DiaconiaViewsLider = (() => {
         const familia = UI().resumoFamiliaCurto(d);
         return `<tr class="no-click" data-id="${d.id}">
         ${UI().bulkTd(d.id, "diaconos")}
+        <td>${UI().badgeAtivo(d.ativo)}</td>
         <td>${UI().esc(d.nome)}${parceiro ? `<div class="muted" style="font-size:12px">💑 ${UI().esc(parceiro)}</div>` : ""}</td>
         <td>${UI().esc(UI().nomeEquipe(state, d.equipeId))}</td>
         <td>${ministerio ? UI().esc(ministerio) : `<span class="muted">—</span>`}</td>
@@ -640,7 +694,6 @@ window.DiaconiaViewsLider = (() => {
             ? `<span class="badge badge-ok" title="${UI().esc(d.whatsapp)}">WA</span>`
             : `<span class="badge badge-muted" title="Sem WhatsApp">—</span>`
         }</td>
-        <td>${d.ativo ? UI().badgeStatus("completa") : UI().badgeStatus("incompleta")}</td>
         <td>
           <div class="toolbar">
             ${UI().btnIcon({ icon: "eye", label: "Ver dados pessoais", variant: "ghost", attrs: { "data-act": "preview-d", "data-id": d.id } })}
@@ -656,7 +709,7 @@ window.DiaconiaViewsLider = (() => {
       <div class="topbar">
         <div>
           <h1>Diáconos</h1>
-          <p class="sub">Cadastro completo. Dados pessoais sincronizam com Minha conta do diácono. <span class="muted">${lista.length} de ${state.diaconos.length}</span></p>
+          <p class="sub">Cadastro completo. Líderes só listados aqui se “Aparece na aba Diáconos” estiver marcado em Configurações. <span class="muted">${lista.length} de ${state.diaconos.length}</span></p>
         </div>
         <div class="diaconos-tools">
           <input type="search" id="filtro-busca-d" class="input input-slim" placeholder="Buscar…" value="${UI().esc(busca)}" aria-label="Buscar nome"/>
@@ -672,7 +725,7 @@ window.DiaconiaViewsLider = (() => {
         ${UI().bulkBar("diaconos")}
         <div class="table-wrap">
           <table class="data" data-bulk-table="diaconos">
-            <thead><tr>${UI().bulkTh("diaconos")}<th>Nome</th><th>Equipe</th><th>Ministério</th><th>Diaconato</th><th>Família</th><th>WA</th><th>Status</th><th>Ação</th></tr></thead>
+            <thead><tr>${UI().bulkTh("diaconos")}<th>Status</th><th>Nome</th><th>Equipe</th><th>Ministério</th><th>Diaconato</th><th>Família</th><th>WA</th><th>Ação</th></tr></thead>
             <tbody>${rows || `<tr class="no-click"><td colspan="9" class="empty">Nenhum diácono neste filtro.</td></tr>`}</tbody>
           </table>
         </div>
@@ -806,7 +859,8 @@ window.DiaconiaViewsLider = (() => {
       <label class="field"><span><input type="checkbox" id="d-all" ${all ? "checked" : ""}/> Pode servir em todas as funções</span></label>
       <div class="check-list" id="d-funs" style="max-height:180px;overflow:auto">${funChecks}</div>
       <p class="muted" style="font-size:12px;margin:0">As caixas acima limitam o que o gerador pode atribuir. A “função no diaconato” é o papel principal deste diácono.</p>
-      <label class="field"><span><input type="checkbox" id="d-ativo" ${diacono?.ativo !== false ? "checked" : ""}/> Ativo</span></label>
+      <label class="field"><span><input type="checkbox" id="d-ativo" ${diacono?.ativo !== false ? "checked" : ""}/> Ativo (pode ser escalado)</span></label>
+      <p class="muted" style="font-size:12px;margin:-8px 0 12px">Desmarcado = <strong>Inativo</strong> — não entra na geração automática nem na montagem manual da escala.</p>
       <div class="modal-actions">
         ${diacono ? `<button class="btn btn-danger" data-act="delete" style="margin-right:auto">Excluir</button>` : ""}
         <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
@@ -955,10 +1009,10 @@ window.DiaconiaViewsLider = (() => {
           }</p>
           <div class="chips">${
             members
-              .map(
-                (m) =>
-                  `<span class="chip chip-member" data-act="edit-d" data-id="${m.id}" title="Editar ${UI().esc(m.nome)}">${UI().esc(m.nome)}<button type="button" class="chip-x" data-act="remove-d" data-id="${m.id}" title="Excluir ${UI().esc(m.nome)}" aria-label="Excluir ${UI().esc(m.nome)}">×</button></span>`
-              )
+              .map((m) => {
+                const cls = m.ativo !== false ? "chip chip-member" : "chip chip-member chip-inactive";
+                return `<span class="${cls}" data-act="edit-d" data-id="${m.id}" title="Editar ${UI().esc(m.nome)}">${UI().badgeAtivo(m.ativo)} ${UI().esc(m.nome)}<button type="button" class="chip-x" data-act="remove-d" data-id="${m.id}" title="Excluir ${UI().esc(m.nome)}" aria-label="Excluir ${UI().esc(m.nome)}">×</button></span>`;
+              })
               .join("") || `<span class="muted">Nenhum diácono nesta equipe.</span>`
           }</div>
           <div class="toolbar" style="margin-top:12px">
@@ -1191,7 +1245,7 @@ window.DiaconiaViewsLider = (() => {
 
     const opts = (selectedId) =>
       state.diaconos
-        .filter((d) => d.ativo && (!ocupados.has(d.id) || d.id === selectedId))
+        .filter((d) => d.ativo !== false && (!ocupados.has(d.id) || d.id === selectedId))
         .map(
           (d) =>
             `<option value="${d.id}" ${d.id === selectedId ? "selected" : ""}>${UI().esc(d.nome)} (${UI().esc(UI().nomeEquipe(state, d.equipeId))})</option>`
@@ -1525,7 +1579,7 @@ window.DiaconiaViewsLider = (() => {
   function formRestricaoLider(app, restricao = null) {
     const { state } = ctx(app);
     const diacOpts = state.diaconos
-      .filter((d) => d.ativo || d.id === restricao?.diaconoId)
+      .filter((d) => d.ativo !== false || d.id === restricao?.diaconoId)
       .map(
         (d) =>
           `<option value="${d.id}" ${restricao?.diaconoId === d.id ? "selected" : ""}>${UI().esc(d.nome)} (${UI().esc(UI().nomeEquipe(state, d.equipeId))})</option>`
@@ -1987,15 +2041,25 @@ window.DiaconiaViewsLider = (() => {
       .map((u) => {
         const papelLabel = u.papel === "lider" ? "Liderança" : "Diácono";
         const wa = whatsappDoUsuario(state, u);
+        const perfil = u.diaconoId ? state.diaconos.find((d) => d.id === u.diaconoId) : null;
+        const statusCell = perfil
+          ? UI().badgeAtivo(perfil.ativo)
+          : `<span class="badge badge-muted" title="Sem perfil na escala">—</span>`;
+        const perfilCell = perfil
+          ? `<span class="badge badge-ok" title="Configure em Diáconos">Na escala</span>`
+          : u.papel === "lider"
+            ? `<span class="badge badge-muted" title="Marque Entrar na escala na edição">Fora da escala</span>`
+            : `<span class="badge badge-muted">—</span>`;
         const waBadge = window.DiaconiaWhatsApp?.numeroValido?.(wa)
           ? `<span class="badge badge-ok" title="${UI().esc(wa)}">WA</span>`
           : `<span class="badge badge-muted" title="Sem WhatsApp">—</span>`;
         return `<tr class="no-click">
         ${UI().bulkTd(u.id, "usuarios", { disabled: sessao?.usuarioId === u.id })}
+        <td>${statusCell}</td>
         <td><strong>${UI().esc(u.nome)}</strong></td>
         <td><code>${UI().esc(u.login)}</code></td>
         <td><span class="badge badge-${u.papel === "lider" ? "ok" : "muted"}">${UI().esc(papelLabel)}</span></td>
-        <td>${u.papel === "lider" ? "—" : u.diaconoId ? `<span class="badge badge-ok" title="Configure em Diáconos">Ativo</span>` : `<span class="badge badge-muted">—</span>`}</td>
+        <td>${perfilCell}</td>
         <td>${waBadge}</td>
         <td>
           <div class="toolbar">
@@ -2016,13 +2080,13 @@ window.DiaconiaViewsLider = (() => {
       <div class="topbar">
         <div>
           <h1>Usuários</h1>
-          <p class="sub">Contas de acesso. Diáconos recebem perfil automático — equipe e funções se configuram depois em Diáconos.</p>
+          <p class="sub">Contas de acesso. Diáconos e líderes com “Entrar na escala” aparecem em Diáconos para equipe e funções.</p>
         </div>
         <button type="button" class="btn btn-accent" id="btn-add-u">+ Adicionar usuário</button>
       </div>
       <div class="panel">${UI().bulkBar("usuarios")}<div class="table-wrap"><table class="data" data-bulk-table="usuarios">
-        <thead><tr>${UI().bulkTh("usuarios")}<th>Nome</th><th>Login</th><th>Papel</th><th>Perfil</th><th>WA</th><th>Ações</th></tr></thead>
-        <tbody>${rows || `<tr class="no-click"><td colspan="7" class="empty">Nenhum usuário.</td></tr>`}</tbody>
+        <thead><tr>${UI().bulkTh("usuarios")}<th>Status</th><th>Nome</th><th>Login</th><th>Papel</th><th>Perfil</th><th>WA</th><th>Ações</th></tr></thead>
+        <tbody>${rows || `<tr class="no-click"><td colspan="8" class="empty">Nenhum usuário.</td></tr>`}</tbody>
       </table></div></div>`;
   }
 
@@ -2091,6 +2155,7 @@ window.DiaconiaViewsLider = (() => {
   function formUsuario(app, usuario = null) {
     const { state } = ctx(app);
     const waInicial = whatsappDoUsuario(state, usuario);
+    const jaNaEscala = !!(usuario?.diaconoId && state.diaconos.some((d) => d.id === usuario.diaconoId));
     UI().openModal(`
       <h2>${usuario ? "Editar usuário" : "Adicionar usuário"}</h2>
       <label class="field"><span>Nome</span><input id="u-nome" value="${UI().esc(usuario?.nome || "")}"/></label>
@@ -2121,6 +2186,10 @@ window.DiaconiaViewsLider = (() => {
         </select>
       </label>
       <p class="muted" style="font-size:12px;margin:-6px 0 8px" id="u-papel-hint">Diácono: o perfil no cadastro é criado automaticamente. Equipe, funções e demais dados se ajustam depois em Diáconos.</p>
+      <div id="u-wrap-escala" style="display:none">
+        <label class="field"><span><input type="checkbox" id="u-entrar-escala" ${jaNaEscala ? "checked" : ""}/> Entrar na escala</span></label>
+        <p class="muted" style="font-size:12px;margin:-8px 0 12px">Marcado = o líder recebe perfil em <strong>Diáconos</strong> e pode ser escalado (defina equipe e funções lá). Desmarcado = só gestão, sem escala.</p>
+      </div>
       ${
         usuario
           ? `<button type="button" class="btn btn-ghost btn-block" data-act="share-wa" style="margin-top:4px">📲 Compartilhar login e senha no WhatsApp</button>`
@@ -2139,9 +2208,11 @@ window.DiaconiaViewsLider = (() => {
       const lider = m.querySelector("#u-papel").value === "lider";
       const hint = m.querySelector("#u-wa-hint");
       const papelHint = m.querySelector("#u-papel-hint");
+      const wrapEscala = m.querySelector("#u-wrap-escala");
+      if (wrapEscala) wrapEscala.style.display = lider ? "" : "none";
       if (papelHint) {
         papelHint.textContent = lider
-          ? "Liderança: acesso ao painel de gestão de escalas, diáconos e equipes."
+          ? "Liderança: acesso ao painel de gestão. Marque “Entrar na escala” se também for servir nos cultos."
           : "Diácono: o perfil no cadastro é criado automaticamente. Equipe, funções e demais dados se ajustam depois em Diáconos.";
       }
       if (hint && usuario) {
@@ -2189,6 +2260,8 @@ window.DiaconiaViewsLider = (() => {
       const senha = m.querySelector("#u-senha").value;
       const papel = m.querySelector("#u-papel").value;
       const whatsapp = waDigits(m.querySelector("#u-whatsapp")?.value);
+      const entrarNaEscala =
+        papel === "diacono" || !!m.querySelector("#u-entrar-escala")?.checked;
       const logId = ctx(app).sessao()?.usuarioId;
       if (whatsapp && !window.DiaconiaWhatsApp?.numeroValido?.(whatsapp)) {
         return UI().toast("WhatsApp inválido. Use DD + número (ex.: 47997845287).");
@@ -2213,11 +2286,17 @@ window.DiaconiaViewsLider = (() => {
         window.DiaconiaStorage.touchUsuario?.(usuario);
         if (papel === "lider") {
           syncLiderDeUsuario(state, usuario, whatsapp);
-          usuario.diaconoId = null;
         } else {
           removerLiderDeUsuario(state, usuario.id);
-          garantirPerfilDiacono(state, usuario, { nome, whatsapp }, logId);
-          syncDiaconoWhatsappDoUsuario(state, usuario, whatsapp);
+        }
+        garantirPerfilDiacono(state, usuario, { nome, whatsapp, entrarNaEscala }, logId);
+        syncDiaconoWhatsappDoUsuario(state, usuario, whatsapp);
+        if (ctx(app).sessao()?.usuarioId === usuario.id) {
+          window.DiaconiaAuth.atualizarSessao({
+            nome: usuario.nome,
+            papel: usuario.papel,
+            diaconoId: usuario.diaconoId || null,
+          });
         }
         window.DiaconiaHistory.add(state, {
           tipo: "usuario",
@@ -2236,10 +2315,9 @@ window.DiaconiaViewsLider = (() => {
         };
         if (papel === "lider") {
           syncLiderDeUsuario(state, novo, whatsapp);
-        } else {
-          garantirPerfilDiacono(state, novo, { nome, whatsapp }, logId);
-          syncDiaconoWhatsappDoUsuario(state, novo, whatsapp);
         }
+        garantirPerfilDiacono(state, novo, { nome, whatsapp, entrarNaEscala }, logId);
+        syncDiaconoWhatsappDoUsuario(state, novo, whatsapp);
         state.usuarios.push(novo);
         window.DiaconiaStorage.touchUsuario?.(novo);
         window.DiaconiaHistory.add(state, {
@@ -2401,7 +2479,9 @@ window.DiaconiaViewsLider = (() => {
           <label class="field"><span>WhatsApp (DD)</span>
             <input data-l="whatsapp" data-id="${l.id}" value="${UI().esc(l.whatsapp || "")}" placeholder="Ex.: 47999990000"/>
           </label>
-          <label class="field"><span><input type="checkbox" data-l="ativo" data-id="${l.id}" ${l.ativo !== false ? "checked" : ""}/> Ativo (aparece para o diácono)</span></label>
+          <label class="field"><span><input type="checkbox" data-l="ativo" data-id="${l.id}" ${l.ativo !== false ? "checked" : ""}/> Visível em Minha conta (Falar com um líder)</span></label>
+          <label class="field"><span><input type="checkbox" data-l="apareceEmDiaconos" data-id="${l.id}" ${l.apareceEmDiaconos !== false ? "checked" : ""}/> Aparece na aba Diáconos</span></label>
+          <p class="muted" style="font-size:12px;margin:-8px 0 0">Só vale se o líder estiver na escala (Usuários → Entrar na escala). Não afeta a geração da escala.</p>
         </div>`
       )
       .join("");
@@ -2437,7 +2517,7 @@ window.DiaconiaViewsLider = (() => {
           <div class="panel-head" style="margin-bottom:12px">
             <div>
               <h2 style="margin:0">Líderes (WhatsApp)</h2>
-              <p class="muted" style="font-size:13px;margin:4px 0 0"><strong>${qLideres}</strong> cadastrado(s) · <strong>${qLideresAtivos}</strong> visível(is) para diáconos em Minha conta</p>
+              <p class="muted" style="font-size:13px;margin:4px 0 0"><strong>${qLideres}</strong> cadastrado(s) · <strong>${qLideresAtivos}</strong> visível(is) em Minha conta · marque “Aparece na aba Diáconos” por líder</p>
             </div>
             <button type="button" class="btn btn-accent btn-sm" id="btn-add-lider">+ Adicionar líder</button>
           </div>
@@ -2634,6 +2714,7 @@ window.DiaconiaViewsLider = (() => {
         nome: `Líder ${(state.lideres.length || 0) + 1}`,
         whatsapp: "",
         ativo: true,
+        apareceEmDiaconos: true,
       });
       app.save();
       app.render();
@@ -2663,7 +2744,7 @@ window.DiaconiaViewsLider = (() => {
       root.querySelectorAll("[data-l][data-id]").forEach((inp) => {
         const l = state.lideres.find((x) => x.id === inp.dataset.id);
         if (!l) return;
-        if (inp.dataset.l === "ativo") l.ativo = inp.checked;
+        if (inp.dataset.l === "ativo" || inp.dataset.l === "apareceEmDiaconos") l[inp.dataset.l] = inp.checked;
         else l[inp.dataset.l] = inp.value.trim();
       });
       for (const l of state.lideres || []) {

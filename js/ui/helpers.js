@@ -30,6 +30,14 @@ window.DiaconiaUI = (() => {
     return `<span class="badge badge-${info.tom}"><span class="dot dot-${info.tom}"></span>${esc(info.texto)}</span>`;
   }
 
+  /** Status de cadastro do diácono (escalável ou não). */
+  function badgeAtivo(ativo) {
+    if (ativo !== false) {
+      return `<span class="badge badge-ok" title="Pode ser escalado"><span class="dot dot-ok"></span>Ativo</span>`;
+    }
+    return `<span class="badge badge-muted" title="Não entra na escala"><span class="dot dot-muted"></span>Inativo</span>`;
+  }
+
   function openModal(html, { wide = false, onClose = null } = {}) {
     closeModal();
     const back = document.createElement("div");
@@ -699,6 +707,7 @@ window.DiaconiaUI = (() => {
     esc,
     toast,
     badgeStatus,
+    badgeAtivo,
     openModal,
     closeModal,
     confirmModal,
