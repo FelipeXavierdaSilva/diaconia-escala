@@ -241,12 +241,17 @@ window.DiaconiaViewsLider = (() => {
         const eqId = (esc.equipesIds || [])[0];
         const sEq = eqId ? Engine().statusEquipe(esc, eqId, state) : "vazia";
         const tom = sEq === "completa" ? "ok" : sEq === "vazia" ? "muted" : "warn";
+        const eqNome = eqId ? UI().nomeEquipe(state, eqId) : "—";
+        const hintProb =
+          st === "incompleta" && esc.problemas?.[0]?.mensagem
+            ? `<div class="muted" style="font-size:11px;max-width:220px;line-height:1.3;margin-top:4px">${UI().esc(esc.problemas[0].mensagem)}</div>`
+            : "";
         return `<tr data-data="${esc.data}">
           ${UI().bulkTd(esc.data, "escalas-lista")}
           <td>${UI().esc(Cal().formatBRCurto(esc.data))}<div class="muted" style="font-size:12px">${UI().esc(Cal().diaSemana(esc.data))}</div></td>
           <td>${UI().esc(esc.nome)}</td>
-          <td><span class="badge badge-${tom}">${UI().esc(eqId ? UI().nomeEquipe(state, eqId) : "—")}</span></td>
-          <td>${UI().badgeStatus(st)}</td>
+          <td><span class="badge badge-${tom}">${UI().esc(eqNome)}</span></td>
+          <td>${UI().badgeStatus(st)}${hintProb}</td>
           <td>
             <div class="toolbar">
               ${UI().btnIcon({ icon: "eye", label: "Abrir", variant: "ghost", attrs: { "data-act": "abrir", "data-data": esc.data } })}
@@ -488,17 +493,30 @@ window.DiaconiaViewsLider = (() => {
         eqsAtivas.find((x) => x.id === (res.equipeInicioId || equipeInicioId))?.nome || equipeInicioId;
       window.DiaconiaHistory.add(state, {
         tipo: "gerar",
-        mensagem: `Escala gerada: ${qtdMeses} mês(es) a partir de ${Cal().nomeMes(mes)}/${ano}, começando com ${nomeEq}${res.criadas ? ` (${res.criadas} culto(s) criado(s))` : ""}.`,
+        mensagem: `Escala gerada: ${qtdMeses} mês(es) a partir de ${Cal().nomeMes(mes)}/${ano}, começando com ${nomeEq}${res.criadas ? ` (${res.criadas} culto(s) criado(s))` : ""}${res.incompletas ? ` · ${res.incompletas} incompleta(s)` : ""}.`,
         usuarioId: ctx(app).sessao()?.usuarioId,
       });
       app.save();
       UI().closeModal();
       app.render();
-      UI().toast(
-        res.criadas
-          ? `Escala gerada (${qtdMeses} mês${qtdMeses > 1 ? "es" : ""}, ${res.criadas} culto(s) novo(s)) — início: ${nomeEq}.`
-          : `Escala gerada para ${qtdMeses} mês${qtdMeses > 1 ? "es" : ""} — 1º domingo: ${nomeEq}.`
-      );
+
+      if (res.incompletas) {
+        const faltaCasal = (res.motivos || []).some((m) => /casal/i.test(m));
+        UI().toast(
+          `${res.completas || 0} completa(s), ${res.incompletas} incompleta(s).` +
+            (faltaCasal
+              ? " Cadastre casais na equipe (aba Casais) para Aconselhamento/Fechar templo."
+              : res.motivos?.[0]
+                ? ` ${res.motivos[0]}`
+                : "")
+        );
+      } else {
+        UI().toast(
+          res.criadas
+            ? `Escala gerada (${qtdMeses} mês${qtdMeses > 1 ? "es" : ""}, ${res.criadas} culto(s) novo(s)) — início: ${nomeEq}.`
+            : `Escala gerada para ${qtdMeses} mês${qtdMeses > 1 ? "es" : ""} — 1º domingo: ${nomeEq}.`
+        );
+      }
     });
   }
 
@@ -1036,6 +1054,10 @@ window.DiaconiaViewsLider = (() => {
     const cards = state.equipes
       .map((eq) => {
         const members = state.diaconos.filter((d) => d.equipeId === eq.id);
+        const diag =
+          typeof Engine().diagnosticoCasaisEquipe === "function"
+            ? Engine().diagnosticoCasaisEquipe(state, eq.id)
+            : null;
         return `<div class="panel">
           <div class="panel-head">
             <h2>${UI().esc(eq.nome)}${
@@ -1050,6 +1072,10 @@ window.DiaconiaViewsLider = (() => {
           </div>
           <p class="muted">${members.length} diácono(s)${
             eq.nomeDefinido ? "" : " · defina o nome para aparecer aos diáconos"
+          }${
+            diag
+              ? ` · <span title="${UI().esc(diag.resumo)}">${diag.aptos} casal(is) apto(s) p/ Aconselhamento/Fechar</span>`
+              : ""
           }</p>
           <div class="chips">${
             members
@@ -1197,11 +1223,26 @@ window.DiaconiaViewsLider = (() => {
             : c.preferirMesmoDia
               ? "Mesmo dia (funções livres)"
               : "Sem preferência de dia";
+        const da = state.diaconos.find((d) => d.id === c.diaconoIdA);
+        const db = state.diaconos.find((d) => d.id === c.diaconoIdB);
+        const eqA = da?.equipeId ? UI().nomeEquipe(state, da.equipeId) : "—";
+        const eqB = db?.equipeId ? UI().nomeEquipe(state, db.equipeId) : "—";
+        const mesmaEq = da?.equipeId && da.equipeId === db?.equipeId;
+        const eqLabel = mesmaEq
+          ? eqA
+          : `${eqA} / ${eqB}`;
+        const avisoEq = !mesmaEq
+          ? `<div class="muted" style="font-size:11px;color:var(--warn)">Cônjuges em equipes diferentes — gerador não usa em Aconselhamento/Fechar</div>`
+          : c.naoServirJuntos
+            ? `<div class="muted" style="font-size:11px;color:var(--warn)">Não serve para funções que exigem o casal junto</div>`
+            : "";
         return `<tr class="no-click">
           ${UI().bulkTd(c.id, "casais")}
           <td><strong>${UI().esc(Engine().nomeCasal(state, c))}</strong>
             ${c.observacao ? `<div class="muted" style="font-size:12px">${UI().esc(c.observacao)}</div>` : ""}
+            ${avisoEq}
           </td>
+          <td>${UI().esc(eqLabel)}</td>
           <td>${UI().esc(modo)}</td>
           <td>${c.ativo !== false ? UI().badgeStatus("completa") : UI().badgeStatus("incompleta")}</td>
           <td class="toolbar">
@@ -1215,8 +1256,8 @@ window.DiaconiaViewsLider = (() => {
     return `
       <div class="topbar">
         <div>
-          <h1>💑 Casais</h1>
-          <p class="sub">Defina quem forma casal. O gerador tenta colocar os dois no mesmo culto; a mesma função só quando você marcar.</p>
+          <h1>Casais</h1>
+          <p class="sub">O vínculo precisa estar nesta aba (não basta marcar “casado” no diácono). Para Aconselhamento e Fechar templo, os dois devem estar na <strong>mesma equipe</strong> e sem “não servir juntos”.</p>
         </div>
         <button class="btn btn-accent" id="btn-add-casal">+ Novo casal</button>
       </div>
@@ -1228,8 +1269,8 @@ window.DiaconiaViewsLider = (() => {
       <div class="panel">
         ${UI().bulkBar("casais")}
         <div class="table-wrap"><table class="data" data-bulk-table="casais">
-          <thead><tr>${UI().bulkTh("casais")}<th>Casal</th><th>Preferência</th><th>Status</th><th>Ações</th></tr></thead>
-          <tbody>${rows || `<tr class="no-click"><td colspan="5" class="empty">Nenhum casal cadastrado.</td></tr>`}</tbody>
+          <thead><tr>${UI().bulkTh("casais")}<th>Casal</th><th>Equipe</th><th>Preferência</th><th>Status</th><th>Ações</th></tr></thead>
+          <tbody>${rows || `<tr class="no-click"><td colspan="6" class="empty">Nenhum casal cadastrado.</td></tr>`}</tbody>
         </table></div>
       </div>`;
   }

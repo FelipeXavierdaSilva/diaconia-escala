@@ -577,6 +577,31 @@ window.DiaconiaEngine = (() => {
       if (ids.length < qtd) {
         const porLimite = atingiuLimitePessoas() && ids.length === 0;
         const faltaCasal = exigeCasal(state, fid);
+        let mensagemCasal = `A função ${funcao.nome} precisa de um casal cadastrado (2 pessoas). Só há ${ids.length}.`;
+        let sugestoesCasal = [
+          "Cadastre o casal em Casais (os dois na mesma equipe).",
+          "Ou desative esta função neste culto em Editar data e equipe.",
+          "Revise restrições aprovadas desta data.",
+        ];
+        if (faltaCasal) {
+          const diag = diagnosticoCasaisEquipe(state, equipeId);
+          mensagemCasal = `A função ${funcao.nome} precisa de casal. ${diag.resumo}`;
+          if (diag.naoJuntos && !diag.aptos) {
+            sugestoesCasal = [
+              "Desmarque “Não podem servir juntos” nesse casal (aba Casais), ou",
+              "Cadastre outro casal que possa servir junto nesta função.",
+            ];
+          } else if (diag.cruzados && !diag.aptos) {
+            sugestoesCasal = [
+              "Coloque os dois cônjuges na mesma equipe (aba Diáconos), ou",
+              "Recadastre o casal com duas pessoas da Equipe deste culto.",
+            ];
+          } else if (diag.casadosSemVinculo && !diag.aptos) {
+            sugestoesCasal = [
+              "Em Casais, use + Novo casal e vincule as duas pessoas (não basta marcar “casado” no diácono).",
+            ];
+          }
+        }
         problemas.push({
           equipeId,
           funcaoId: fid,
@@ -585,7 +610,7 @@ window.DiaconiaEngine = (() => {
           mensagem: porLimite
             ? `A função ${funcao.nome} ficou incompleta pelo limite de pessoas configurado para este tipo de evento.`
             : faltaCasal
-              ? `A função ${funcao.nome} precisa de um casal cadastrado (2 pessoas). Só há ${ids.length}.`
+              ? mensagemCasal
               : `A função ${funcao.nome} precisa de ${qtd} pessoa(s), mas só há ${ids.length} disponível(eis) autorizado(s).`,
           sugestoes: porLimite
             ? [
@@ -593,11 +618,7 @@ window.DiaconiaEngine = (() => {
                 "Ou reduza a quantidade exigida na função.",
               ]
             : faltaCasal
-              ? [
-                  "Cadastre o casal em Casais (mesma equipe).",
-                  "Ou desative esta função neste culto em Editar data e equipe.",
-                  "Revise restrições aprovadas desta data.",
-                ]
+              ? sugestoesCasal
               : [
                   "Autorizar outro diácono para a função.",
                   "Adicionar um diácono à equipe.",
@@ -655,6 +676,46 @@ window.DiaconiaEngine = (() => {
     );
   }
 
+  /**
+   * Por que o gerador não conseguiu montar funções que exigem casal nesta equipe.
+   * (Casais da aba Casais — não basta “casado” no cadastro do diácono.)
+   */
+  function diagnosticoCasaisEquipe(state, equipeId) {
+    const membros = diaconosDaEquipe(state, equipeId);
+    const ids = new Set(membros.map((d) => d.id));
+    const todos = casaisAtivos(state);
+    const naEquipe = todos.filter((c) => ids.has(c.diaconoIdA) && ids.has(c.diaconoIdB));
+    const aptos = naEquipe.filter((c) => !c.naoServirJuntos);
+    const naoJuntos = naEquipe.filter((c) => c.naoServirJuntos);
+    const cruzados = todos.filter((c) => {
+      const a = ids.has(c.diaconoIdA);
+      const b = ids.has(c.diaconoIdB);
+      return a !== b;
+    });
+    const casadosSemVinculo = membros.filter((d) => d.casado && !infoCasal(state, d.id)).length;
+
+    let resumo = "";
+    if (aptos.length) {
+      resumo = `${aptos.length} casal(is) apto(s) nesta equipe.`;
+    } else if (naoJuntos.length && !aptos.length) {
+      resumo = `${naoJuntos.length} casal(is) na equipe, mas marcados como “não servir juntos” — não podem fazer Aconselhamento/Fechar templo.`;
+    } else if (cruzados.length) {
+      resumo = `${cruzados.length} casal(is) com cônjuges em equipes diferentes — o gerador só usa casal com os dois na mesma equipe.`;
+    } else if (casadosSemVinculo) {
+      resumo = `${casadosSemVinculo} pessoa(s) marcada(s) como casada(s) no cadastro, mas sem vínculo na aba Casais.`;
+    } else {
+      resumo = "Nenhum casal cadastrado na aba Casais com os dois nesta equipe.";
+    }
+
+    return {
+      aptos: aptos.length,
+      naoJuntos: naoJuntos.length,
+      cruzados: cruzados.length,
+      casadosSemVinculo,
+      resumo,
+    };
+  }
+
   function nomeCasal(state, casal) {
     const a = state.diaconos.find((d) => d.id === casal.diaconoIdA)?.nome || "?";
     const b = state.diaconos.find((d) => d.id === casal.diaconoIdB)?.nome || "?";
@@ -703,6 +764,41 @@ window.DiaconiaEngine = (() => {
       esc.gerada = true;
     }
     return lista;
+  }
+
+  function resumoGeracaoPeriodo(state, anoInicio, mesInicio, qtdMeses) {
+    let ano = anoInicio;
+    let mes = mesInicio;
+    const qtd = Math.min(12, Math.max(1, Number(qtdMeses) || 1));
+    let completas = 0;
+    let incompletas = 0;
+    const porEquipe = {};
+    const motivos = [];
+    for (let i = 0; i < qtd; i++) {
+      for (const esc of Cal().escalasDoMes(state, ano, mes)) {
+        const st = statusEscala(esc, state);
+        const eqId = esc.equipesIds?.[0] || "?";
+        if (!porEquipe[eqId]) porEquipe[eqId] = { completas: 0, incompletas: 0 };
+        if (st === "completa") {
+          completas += 1;
+          porEquipe[eqId].completas += 1;
+        } else if ((esc.problemas || []).length || st === "incompleta" || st === "em_edicao") {
+          incompletas += 1;
+          porEquipe[eqId].incompletas += 1;
+          for (const p of esc.problemas || []) {
+            if (p.mensagem && motivos.length < 4 && !motivos.includes(p.mensagem)) {
+              motivos.push(p.mensagem);
+            }
+          }
+        }
+      }
+      mes += 1;
+      if (mes > 12) {
+        mes = 1;
+        ano += 1;
+      }
+    }
+    return { completas, incompletas, porEquipe, motivos };
   }
 
   function escalasGeradasDoMes(state, ano, mes) {
@@ -813,7 +909,8 @@ window.DiaconiaEngine = (() => {
         ano += 1;
       }
     }
-    return { mesesGerados, criadas, equipeInicioId };
+    const resumo = resumoGeracaoPeriodo(state, anoInicio, mesInicio, qtd);
+    return { mesesGerados, criadas, equipeInicioId, ...resumo };
   }
 
   function garantirEscalasAno(state, ano) {
@@ -1229,6 +1326,7 @@ window.DiaconiaEngine = (() => {
     garantirEscalasMes,
     garantirEscalasAno,
     sugerirEquipeInicioMes,
+    resumoGeracaoPeriodo,
     gerarPeriodo,
     gerarAno,
     alterarAtribuicao,
@@ -1244,6 +1342,7 @@ window.DiaconiaEngine = (() => {
     casaisAtivos,
     infoCasal,
     casaisDaEquipe,
+    diagnosticoCasaisEquipe,
     nomeCasal,
   };
 })();
