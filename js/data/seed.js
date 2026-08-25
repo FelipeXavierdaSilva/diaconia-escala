@@ -457,6 +457,7 @@ window.DiaconiaSeed = (() => {
           respeitarHorarioMinisterio: true,
           priorizarSemMinisterio: true,
           funcoesExigemCasal: ["aconselhamento", "fechar_templo"],
+          vinculosFuncoes: [{ de: "lanche", para: "janta", ativo: true }],
         },
       },
     };

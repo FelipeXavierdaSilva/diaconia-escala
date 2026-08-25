@@ -162,12 +162,37 @@ window.DiaconiaEngine = (() => {
     });
   }
 
+  /** Funções do culto nesta escala (ignora inativas). */
+  function funcoesDaEscala(state, escala) {
+    const ids = escala?.funcoesIds || state.funcoesPadraoCulto || [];
+    return ids.filter((id) => {
+      const f = getFuncao(state, id);
+      return f && f.ativo !== false;
+    });
+  }
+
   /** Funções do padrão que cabem nesta data (ativo + recorrência). */
   function funcoesParaData(state, dataISO) {
     return funcoesPadraoAtivas(state).filter((id) => {
       const f = getFuncao(state, id);
       return Cal().funcaoEncaixaNaData(f, dataISO);
     });
+  }
+
+  /** Remove função inativa/excluída de todas as escalas. */
+  function removerFuncaoDasEscalas(state, funcaoId) {
+    for (const esc of Object.values(state.escalas || {})) {
+      if (Array.isArray(esc.funcoesIds)) {
+        esc.funcoesIds = esc.funcoesIds.filter((id) => id !== funcaoId);
+      }
+      for (const eq of Object.values(esc.atribuicoes || {})) {
+        if (eq && Object.prototype.hasOwnProperty.call(eq, funcaoId)) delete eq[funcaoId];
+      }
+      esc.problemas = (esc.problemas || []).filter((p) => p.funcaoId !== funcaoId);
+      if (typeof statusEscala === "function") {
+        esc.status = statusEscala(esc, state);
+      }
+    }
   }
 
   function validarParFuncaoCasal(state, funcaoId, ids) {
@@ -261,6 +286,11 @@ window.DiaconiaEngine = (() => {
 
   function cfgGeracao(state) {
     const g = state.configuracoes?.geracao || {};
+    const vinculos = Array.isArray(g.vinculosFuncoes)
+      ? g.vinculosFuncoes
+          .filter((v) => v && v.de && v.para && v.ativo !== false)
+          .map((v) => ({ de: v.de, para: v.para, ativo: true }))
+      : [];
     return {
       variarFuncoesNoMes: g.variarFuncoesNoMes !== false,
       evitarMesmaFuncaoConsecutiva: g.evitarMesmaFuncaoConsecutiva !== false,
@@ -275,6 +305,7 @@ window.DiaconiaEngine = (() => {
       funcoesExigemCasal: Array.isArray(g.funcoesExigemCasal)
         ? [...g.funcoesExigemCasal]
         : [...FUNCOES_EXIGEM_CASAL_PADRAO],
+      vinculosFuncoes: vinculos,
     };
   }
 
@@ -286,7 +317,7 @@ window.DiaconiaEngine = (() => {
 
   function statusEquipe(escala, equipeId, state) {
     const atr = escala.atribuicoes?.[equipeId] || {};
-    const funcoes = escala.funcoesIds || state.funcoesPadraoCulto;
+    const funcoes = funcoesDaEscala(state, escala);
     let completa = true;
     let vazia = true;
     for (const fid of funcoes) {
@@ -338,8 +369,24 @@ window.DiaconiaEngine = (() => {
     const [anoStr, mesStr] = data.split("-");
     const ano = +anoStr;
     const mes = +mesStr;
-    let funcoesIds = [...(escala.funcoesIds || state.funcoesPadraoCulto || [])];
-    if (cfg.embaralharOrdemFuncoes) funcoesIds = shuffle(funcoesIds);
+    // Só funções ativas; vínculos "de" antes de "para" para espelhar pessoas
+    let funcoesIds = funcoesDaEscala(state, escala);
+    const ordemVinculo = new Map();
+    cfg.vinculosFuncoes.forEach((v, i) => {
+      if (!ordemVinculo.has(v.de)) ordemVinculo.set(v.de, i * 2);
+      if (!ordemVinculo.has(v.para)) ordemVinculo.set(v.para, i * 2 + 1);
+    });
+    funcoesIds = [...funcoesIds].sort((a, b) => {
+      const oa = ordemVinculo.has(a) ? ordemVinculo.get(a) : 1000;
+      const ob = ordemVinculo.has(b) ? ordemVinculo.get(b) : 1000;
+      return oa - ob;
+    });
+    if (cfg.embaralharOrdemFuncoes) {
+      const fixas = new Set(ordemVinculo.keys());
+      const head = funcoesIds.filter((id) => fixas.has(id));
+      const rest = shuffle(funcoesIds.filter((id) => !fixas.has(id)));
+      funcoesIds = [...head, ...rest];
+    }
 
     const membros = diaconosDaEquipe(state, equipeId);
     const usados = new Set();
@@ -569,6 +616,17 @@ window.DiaconiaEngine = (() => {
       }
     }
 
+    // 5) Vínculos (ex.: Lanche → Janta): quem está na origem também entra no destino
+    for (const v of cfg.vinculosFuncoes) {
+      if (!funcoesIds.includes(v.de) || !funcoesIds.includes(v.para)) continue;
+      if (!atribuicoes[v.para]) atribuicoes[v.para] = [];
+      for (const id of atribuicoes[v.de] || []) {
+        if (atribuicoes[v.para].includes(id)) continue;
+        atribuicoes[v.para].push(id);
+        usados.add(id);
+      }
+    }
+
     for (const fid of funcoesIds) {
       const funcao = getFuncao(state, fid);
       if (!funcao) continue;
@@ -749,6 +807,8 @@ window.DiaconiaEngine = (() => {
     const lista = Cal().escalasDoMes(state, ano, mes);
     let hist = contagemHistorico(state, `${ano}-${String(mes).padStart(2, "0")}-01`);
     for (const esc of lista) {
+      // Garante que funções inativas não permaneçam na escala
+      esc.funcoesIds = funcoesDaEscala(state, esc);
       const eqs = esc.equipesIds || [];
       const atr = {};
       let problemas = [];
@@ -833,21 +893,30 @@ window.DiaconiaEngine = (() => {
     let criadas = 0;
     datas.forEach((data, i) => {
       const eq = eqs[(start + i) % eqs.length];
+      const fids = funcoesParaData(state, data);
+      const funcoesIds = fids.length ? fids : funcoesPadraoAtivas(state);
       if (!state.escalas[data]) {
-        const fids = funcoesParaData(state, data);
         state.escalas[data] = Seed.criarEscalaBase(
           data,
           "culto",
           "Culto",
           horario,
           [eq],
-          fids.length ? fids : funcoesPadraoAtivas(state)
+          funcoesIds
         );
         criadas += 1;
         return;
       }
       if (reatribuir) {
         state.escalas[data].equipesIds = [eq];
+        state.escalas[data].funcoesIds = [...funcoesIds];
+        // Remove atribuições de funções que saíram (inativas / fora da recorrência)
+        const keep = new Set(funcoesIds);
+        for (const atrEq of Object.values(state.escalas[data].atribuicoes || {})) {
+          for (const fid of Object.keys(atrEq || {})) {
+            if (!keep.has(fid)) delete atrEq[fid];
+          }
+        }
       }
     });
     return criadas;
@@ -1313,7 +1382,9 @@ window.DiaconiaEngine = (() => {
     validarParFuncaoCasal,
     casalNaoServeJuntos,
     funcoesPadraoAtivas,
+    funcoesDaEscala,
     funcoesParaData,
+    removerFuncaoDasEscalas,
     contagemHistorico,
     cfgGeracao,
     statusEquipe,

@@ -27,7 +27,9 @@ window.DiaconiaEscalaModal = (() => {
     let minhaEq = null;
     if (diaconoId && !isLider) {
       for (const eqId of esc.equipesIds || []) {
-        for (const fid of esc.funcoesIds || []) {
+        for (const fid of (typeof Engine().funcoesDaEscala === "function"
+          ? Engine().funcoesDaEscala(state, esc)
+          : esc.funcoesIds || [])) {
           const ids = esc.atribuicoes?.[eqId]?.[fid] || [];
           if (ids.includes(diaconoId)) {
             minhaFn = fid;
@@ -130,7 +132,9 @@ window.DiaconiaEscalaModal = (() => {
             }
           </div>`;
 
-        for (const fid of esc.funcoesIds || []) {
+        for (const fid of (typeof Engine().funcoesDaEscala === "function"
+          ? Engine().funcoesDaEscala(state, esc)
+          : esc.funcoesIds || [])) {
           const f = Engine().getFuncao(state, fid);
           const ids = esc.atribuicoes?.[eqId]?.[fid] || [];
           const isMine = diaconoId && ids.includes(diaconoId);
@@ -408,7 +412,13 @@ window.DiaconiaEscalaModal = (() => {
     const esc = state.escalas[data];
     if (!esc) return;
 
-    const funcoesIds = esc.funcoesIds || state.funcoesPadraoCulto || [];
+    const funcoesIds =
+      typeof Engine().funcoesDaEscala === "function"
+        ? Engine().funcoesDaEscala(state, esc)
+        : (esc.funcoesIds || state.funcoesPadraoCulto || []).filter((id) => {
+            const f = Engine().getFuncao(state, id);
+            return f && f.ativo !== false;
+          });
     const membros = Engine().diaconosDaEquipe(state, equipeId);
     const atuais = esc.atribuicoes?.[equipeId] || {};
 
@@ -416,7 +426,7 @@ window.DiaconiaEscalaModal = (() => {
       .map((fid) => {
         const f = Engine().getFuncao(state, fid);
         if (!f) return "";
-        const qtd = f.qtdPorEquipe || 1;
+        const qtd = Math.max(f.qtdPorEquipe || 1, (atuais[fid] || []).length);
         const ids = atuais[fid] || [];
         const selects = Array.from({ length: qtd }, (_, i) => {
           const val = ids[i] || "";

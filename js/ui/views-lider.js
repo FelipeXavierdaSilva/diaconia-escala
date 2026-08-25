@@ -1501,7 +1501,8 @@ window.DiaconiaViewsLider = (() => {
         </label>
         <p class="muted" style="font-size:12px;margin:-6px 0 10px">Você pode ligar ou desligar a função em um culto específico em <strong>Editar data e equipe</strong>.</p>
         <label class="field"><span>Instruções</span><textarea id="fn-inst" class="textarea" rows="4">${UI().esc(f?.instrucoes || "")}</textarea></label>
-        <label class="field"><span><input type="checkbox" id="fn-ativo" ${f?.ativo !== false ? "checked" : ""}/> Ativa (entra no padrão de cultos novos)</span></label>
+        <label class="field"><span><input type="checkbox" id="fn-ativo" ${f?.ativo !== false ? "checked" : ""}/> Ativa</span></label>
+        <p class="muted" style="font-size:12px;margin:-8px 0 12px">Desmarcada = não entra em cultos novos nem na <strong>geração</strong> (some das escalas ao salvar).</p>
         <div class="modal-actions">
           ${f ? `<button class="btn btn-danger" data-act="delete" style="margin-right:auto">Excluir</button>` : ""}
           <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
@@ -1534,12 +1535,15 @@ window.DiaconiaViewsLider = (() => {
           Object.assign(f, payload);
           if (!f.ativo) {
             state.funcoesPadraoCulto = (state.funcoesPadraoCulto || []).filter((id) => id !== f.id);
+            if (typeof Engine().removerFuncaoDasEscalas === "function") {
+              Engine().removerFuncaoDasEscalas(state, f.id);
+            }
           } else if (!(state.funcoesPadraoCulto || []).includes(f.id)) {
             state.funcoesPadraoCulto = [...(state.funcoesPadraoCulto || []), f.id];
           }
           window.DiaconiaHistory.add(state, {
             tipo: "funcao",
-            mensagem: `Função editada: ${f.nome}.`,
+            mensagem: `Função editada: ${f.nome}${f.ativo ? "" : " (inativada — removida das escalas)"}.`,
             usuarioId: ctx(app).sessao()?.usuarioId,
           });
         } else {
@@ -2920,6 +2924,41 @@ window.DiaconiaViewsLider = (() => {
             </div>
 
             <div class="settings-block">
+              <h3>Funções vinculadas</h3>
+              <p class="muted settings-hint">Quem for escalado na função da esquerda também entra automaticamente na da direita (ex.: Lanche dos pastores → Janta).</p>
+              <div id="cfg-vinculos" class="grid" style="gap:10px">
+                ${(() => {
+                  const vins = Array.isArray(ger.vinculosFuncoes) && ger.vinculosFuncoes.length
+                    ? ger.vinculosFuncoes
+                    : [{ de: "lanche", para: "janta", ativo: true }];
+                  const opts = (sel) =>
+                    (state.funcoes || [])
+                      .filter((f) => f.ativo !== false)
+                      .map(
+                        (f) =>
+                          `<option value="${f.id}" ${f.id === sel ? "selected" : ""}>${UI().esc(f.emoji + " " + f.nome)}</option>`
+                      )
+                      .join("");
+                  return vins
+                    .map(
+                      (v, i) => `<div class="vinculo-row" data-idx="${i}" style="display:grid;grid-template-columns:1fr auto 1fr auto;gap:8px;align-items:end">
+                      <label class="field" style="margin:0"><span>Quem faz</span>
+                        <select class="select cfg-vin-de">${opts(v.de)}</select>
+                      </label>
+                      <span class="muted" style="padding-bottom:12px">também faz</span>
+                      <label class="field" style="margin:0"><span>Função</span>
+                        <select class="select cfg-vin-para">${opts(v.para)}</select>
+                      </label>
+                      <button type="button" class="btn btn-ghost btn-sm btn-vin-del" title="Remover">×</button>
+                    </div>`
+                    )
+                    .join("");
+                })()}
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" id="btn-add-vinculo" style="margin-top:8px">+ Vínculo</button>
+            </div>
+
+            <div class="settings-block">
               <h3>Casais</h3>
               <label class="field"><span><input type="checkbox" id="cfg-casais" ${cfg.respeitarCasais !== false ? "checked" : ""}/> Respeitar preferências de casais ao gerar</span></label>
               <p class="muted settings-hint">Inclui “mesmo dia”, “mesma função” e “não servir juntos” (aba <strong>Casais</strong>).</p>
@@ -3072,6 +3111,13 @@ window.DiaconiaViewsLider = (() => {
       g.funcoesExigemCasal = [
         ...root.querySelectorAll('input[name="cfg-exige-casal"]:checked'),
       ].map((i) => i.value);
+      g.vinculosFuncoes = [...root.querySelectorAll("#cfg-vinculos .vinculo-row")]
+        .map((row) => ({
+          de: row.querySelector(".cfg-vin-de")?.value,
+          para: row.querySelector(".cfg-vin-para")?.value,
+          ativo: true,
+        }))
+        .filter((v) => v.de && v.para && v.de !== v.para);
       if (root.querySelector("#cfg-casais")) {
         state.configuracoes.respeitarCasais = root.querySelector("#cfg-casais").checked;
       }
@@ -3175,6 +3221,38 @@ window.DiaconiaViewsLider = (() => {
       });
       app.save();
       UI().toast("Regras da escala salvas.");
+    });
+
+    const vinBox = root.querySelector("#cfg-vinculos");
+    const optsVinculo = () =>
+      (state.funcoes || [])
+        .filter((f) => f.ativo !== false)
+        .map((f) => `<option value="${f.id}">${UI().esc(f.emoji + " " + f.nome)}</option>`)
+        .join("");
+    root.querySelector("#btn-add-vinculo")?.addEventListener("click", () => {
+      if (!vinBox) return;
+      const row = document.createElement("div");
+      row.className = "vinculo-row";
+      row.style.cssText = "display:grid;grid-template-columns:1fr auto 1fr auto;gap:8px;align-items:end";
+      row.innerHTML = `
+        <label class="field" style="margin:0"><span>Quem faz</span>
+          <select class="select cfg-vin-de">${optsVinculo()}</select>
+        </label>
+        <span class="muted" style="padding-bottom:12px">também faz</span>
+        <label class="field" style="margin:0"><span>Função</span>
+          <select class="select cfg-vin-para">${optsVinculo()}</select>
+        </label>
+        <button type="button" class="btn btn-ghost btn-sm btn-vin-del" title="Remover">×</button>`;
+      const para = row.querySelector(".cfg-vin-para");
+      if (para && [...para.options].some((o) => o.value === "janta")) para.value = "janta";
+      const de = row.querySelector(".cfg-vin-de");
+      if (de && [...de.options].some((o) => o.value === "lanche")) de.value = "lanche";
+      vinBox.appendChild(row);
+    });
+    vinBox?.addEventListener("click", (e) => {
+      const btn = e.target.closest(".btn-vin-del");
+      if (!btn) return;
+      btn.closest(".vinculo-row")?.remove();
     });
 
     root.querySelector("#btn-save-wa")?.addEventListener("click", () => {

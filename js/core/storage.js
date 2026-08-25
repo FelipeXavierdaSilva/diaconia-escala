@@ -114,6 +114,12 @@ window.DiaconiaStorage = (() => {
     if (g.permitirAcumularFuncoes === undefined) g.permitirAcumularFuncoes = true;
     if (g.respeitarHorarioMinisterio === undefined) g.respeitarHorarioMinisterio = true;
     if (g.priorizarSemMinisterio === undefined) g.priorizarSemMinisterio = true;
+    if (!Array.isArray(g.vinculosFuncoes)) {
+      const temLanche = (state.funcoes || []).some((f) => f.id === "lanche");
+      const temJanta = (state.funcoes || []).some((f) => f.id === "janta");
+      g.vinculosFuncoes =
+        temLanche && temJanta ? [{ de: "lanche", para: "janta", ativo: true }] : [];
+    }
     if (!Array.isArray(g.funcoesExigemCasal)) {
       g.funcoesExigemCasal = ["aconselhamento", "fechar_templo"].filter((id) =>
         (state.funcoes || []).some((f) => f.id === id)
