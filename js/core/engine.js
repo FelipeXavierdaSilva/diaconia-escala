@@ -22,6 +22,15 @@ window.DiaconiaEngine = (() => {
     return state.funcoes.find((f) => f.id === id);
   }
 
+  /** Quantidade de vagas da função neste culto (override do dia ou padrão da aba Funções). */
+  function qtdFuncaoNaEscala(state, escala, funcaoId) {
+    const f = getFuncao(state, funcaoId);
+    const base = Math.max(1, f?.qtdPorEquipe || 1);
+    const over = escala?.funcoesQtd?.[funcaoId];
+    if (over === undefined || over === null || over === "") return base;
+    return Math.max(1, parseInt(over, 10) || base);
+  }
+
   function getMinisterio(state, id) {
     if (!id) return null;
     return (state.ministerios || []).find((m) => m.id === id) || null;
@@ -321,8 +330,7 @@ window.DiaconiaEngine = (() => {
     let completa = true;
     let vazia = true;
     for (const fid of funcoes) {
-      const f = getFuncao(state, fid);
-      const qtd = f?.qtdPorEquipe || 1;
+      const qtd = qtdFuncaoNaEscala(state, escala, fid);
       const ids = atr[fid] || [];
       if (ids.length) vazia = false;
       if (ids.length < qtd) completa = false;
@@ -414,6 +422,8 @@ window.DiaconiaEngine = (() => {
     function atribuir(fid, diaconoId) {
       if (!atribuicoes[fid]) atribuicoes[fid] = [];
       if (atribuicoes[fid].includes(diaconoId)) return;
+      const qtdMax = getFuncao(state, fid)?.qtdPorEquipe || 1;
+      if (atribuicoes[fid].length >= qtdMax) return;
       atribuicoes[fid].push(diaconoId);
       usados.add(diaconoId);
       hist[diaconoId] = (hist[diaconoId] || 0) + 1;
@@ -616,21 +626,39 @@ window.DiaconiaEngine = (() => {
       }
     }
 
-    // 5) Vínculos (ex.: Lanche → Janta): quem está na origem também entra no destino
+    // 5) Vínculos (ex.: Lanche → Janta): prioriza quem está na origem, sem passar do qtdPorEquipe
     for (const v of cfg.vinculosFuncoes) {
       if (!funcoesIds.includes(v.de) || !funcoesIds.includes(v.para)) continue;
-      if (!atribuicoes[v.para]) atribuicoes[v.para] = [];
-      for (const id of atribuicoes[v.de] || []) {
-        if (atribuicoes[v.para].includes(id)) continue;
-        atribuicoes[v.para].push(id);
-        usados.add(id);
+      const qtdPara = getFuncao(state, v.para)?.qtdPorEquipe || 1;
+      const deIds = atribuicoes[v.de] || [];
+      const atuaisPara = atribuicoes[v.para] || [];
+      const novos = [];
+      for (const id of deIds) {
+        if (novos.length >= qtdPara) break;
+        if (!novos.includes(id)) {
+          novos.push(id);
+          usados.add(id);
+        }
+      }
+      for (const id of atuaisPara) {
+        if (novos.length >= qtdPara) break;
+        if (!novos.includes(id)) novos.push(id);
+      }
+      atribuicoes[v.para] = novos;
+    }
+
+    // 6) Nunca ultrapassar a quantidade configurada na aba Funções
+    for (const fid of funcoesIds) {
+      const qtd = getFuncao(state, fid)?.qtdPorEquipe || 1;
+      if ((atribuicoes[fid] || []).length > qtd) {
+        atribuicoes[fid] = atribuicoes[fid].slice(0, qtd);
       }
     }
 
     for (const fid of funcoesIds) {
       const funcao = getFuncao(state, fid);
       if (!funcao) continue;
-      const qtd = Math.max(funcao.qtdPorEquipe || 1, exigeCasal(state, fid) ? 2 : 1);
+      const qtd = funcao.qtdPorEquipe || 1;
       const ids = atribuicoes[fid] || [];
       if (ids.length < qtd) {
         const porLimite = atingiuLimitePessoas() && ids.length === 0;
@@ -817,6 +845,15 @@ window.DiaconiaEngine = (() => {
         atr[eq] = result.atribuicoes;
         hist = result.historico;
         problemas = problemas.concat(result.problemas);
+      }
+      // Corta excesso legado (acima do qtdPorEquipe da aba Funções)
+      for (const eqId of Object.keys(atr)) {
+        for (const fid of Object.keys(atr[eqId] || {})) {
+          const qtd = getFuncao(state, fid)?.qtdPorEquipe || 1;
+          if ((atr[eqId][fid] || []).length > qtd) {
+            atr[eqId][fid] = atr[eqId][fid].slice(0, qtd);
+          }
+        }
       }
       esc.atribuicoes = atr;
       esc.problemas = problemas;
@@ -1102,12 +1139,13 @@ window.DiaconiaEngine = (() => {
 
     for (const fid of funcoesIds) {
       const funcao = getFuncao(state, fid);
-      if (!funcao) continue;
-      const qtd = Math.max(funcao.qtdPorEquipe || 1, exigeCasal(state, fid) ? 2 : 1);
+      if (!funcao || funcao.ativo === false) continue;
+      const qtd = funcao.qtdPorEquipe || 1;
       const raw = (atribuicoesEq[fid] || []).filter(Boolean);
       const ids = [];
 
       for (const id of raw) {
+        if (ids.length >= qtd) break;
         if (ids.includes(id)) {
           return { ok: false, erro: `Diácono repetido na função ${funcao.nome}.` };
         }

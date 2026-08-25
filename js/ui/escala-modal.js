@@ -136,7 +136,8 @@ window.DiaconiaEscalaModal = (() => {
           ? Engine().funcoesDaEscala(state, esc)
           : esc.funcoesIds || [])) {
           const f = Engine().getFuncao(state, fid);
-          const ids = esc.atribuicoes?.[eqId]?.[fid] || [];
+          const qtd = f?.qtdPorEquipe || 1;
+          const ids = (esc.atribuicoes?.[eqId]?.[fid] || []).slice(0, qtd);
           const isMine = diaconoId && ids.includes(diaconoId);
           const nomes = ids.map((id) => UI().nomeDiacono(state, id)).join(" + ") || "—";
 
@@ -426,8 +427,8 @@ window.DiaconiaEscalaModal = (() => {
       .map((fid) => {
         const f = Engine().getFuncao(state, fid);
         if (!f) return "";
-        const qtd = Math.max(f.qtdPorEquipe || 1, (atuais[fid] || []).length);
-        const ids = atuais[fid] || [];
+        const qtd = f.qtdPorEquipe || 1;
+        const ids = (atuais[fid] || []).slice(0, qtd);
         const selects = Array.from({ length: qtd }, (_, i) => {
           const val = ids[i] || "";
           const opts = membros
