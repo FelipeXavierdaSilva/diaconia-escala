@@ -275,6 +275,22 @@ window.DiaconiaUI = (() => {
     return f ? `${f.emoji} ${f.nome}` : id;
   }
 
+  function nomeMinisterio(state, id) {
+    if (!id) return "";
+    const m = (state.ministerios || []).find((x) => x.id === id);
+    if (!m) return "";
+    const faixa =
+      m.horarioInicio && m.horarioFim ? ` (${m.horarioInicio}–${m.horarioFim})` : "";
+    return `${m.nome}${faixa}`;
+  }
+
+  function labelMinisterioDiacono(state, d) {
+    if (!d) return "";
+    const nome = nomeMinisterio(state, d.ministerioId);
+    if (nome) return nome.replace(/\s*\([^)]*\)\s*$/, "").trim() || nome;
+    return (d.funcaoMinisterio || "").trim();
+  }
+
   /** Normaliza filhos: [{ nome, idade }] a partir do cadastro (inclui legado filhosNomes). */
   function normalizeFilhos(diacono) {
     if (Array.isArray(diacono?.filhos) && diacono.filhos.length) {
@@ -447,8 +463,20 @@ window.DiaconiaUI = (() => {
       labelFilhos = "Tenho filhos",
       labelConjuge = "Casado(a) com",
       showWhatsappHint = true,
+      ministerios = null,
     } = opts;
     const d = diacono || {};
+    const listaMin = Array.isArray(ministerios) ? ministerios : [];
+    const minOpts = [
+      `<option value="">— Nenhum / só diaconia —</option>`,
+      ...listaMin
+        .filter((m) => m.ativo !== false || m.id === d.ministerioId)
+        .map((m) => {
+          const faixa =
+            m.horarioInicio && m.horarioFim ? ` (${m.horarioInicio}–${m.horarioFim})` : "";
+          return `<option value="${esc(m.id)}" ${d.ministerioId === m.id ? "selected" : ""}>${esc(m.nome)}${esc(faixa)}${m.ativo === false ? " (inativo)" : ""}</option>`;
+        }),
+    ].join("");
 
     return `
       <label class="field"><span>Nome</span>
@@ -462,8 +490,12 @@ window.DiaconiaUI = (() => {
           ? `<p class="muted" style="font-size:12px;margin:-6px 0 12px">Usado para pedidos de troca/cobertura.</p>`
           : ""
       }
-      <label class="field"><span>Função no ministério</span>
-        <input id="${prefix}-ministerio" class="input" value="${esc(d.funcaoMinisterio || "")}" placeholder="Ex.: Louvor, Infantil, Recepção…"/>
+      <label class="field"><span>Ministério (outro serviço)</span>
+        <select id="${prefix}-ministerio-id" class="select">${minOpts}</select>
+      </label>
+      <p class="muted" style="font-size:12px;margin:-6px 0 8px">Se servir em outro ministério no culto, o gerador evita funções da diaconia no mesmo horário (pode servir antes ou depois).</p>
+      <label class="field"><span>Papel / observação no ministério (opcional)</span>
+        <input id="${prefix}-ministerio" class="input" value="${esc(d.funcaoMinisterio || "")}" placeholder="Ex.: professor, backvocal…"/>
       </label>
       <div class="check-pair">
         <label class="field check-inline"><span><input type="checkbox" id="${prefix}-casado" ${d.casado ? "checked" : ""}/> ${esc(labelCasado)}</span></label>
@@ -504,6 +536,7 @@ window.DiaconiaUI = (() => {
       whatsapp: window.DiaconiaWhatsApp?.normalizarNumeroInternacional
         ? window.DiaconiaWhatsApp.normalizarNumeroInternacional(root.querySelector(`#${prefix}-whatsapp`)?.value)
         : String(root.querySelector(`#${prefix}-whatsapp`)?.value || "").replace(/\D/g, ""),
+      ministerioId: root.querySelector(`#${prefix}-ministerio-id`)?.value || "",
       funcaoMinisterio: root.querySelector(`#${prefix}-ministerio`)?.value.trim() || "",
       casado,
       conjugeNome: casado ? root.querySelector(`#${prefix}-conjuge`)?.value.trim() || "" : "",
@@ -526,6 +559,7 @@ window.DiaconiaUI = (() => {
   function aplicarDadosPessoais(diacono, data) {
     diacono.nome = data.nome;
     diacono.whatsapp = data.whatsapp;
+    if (data.ministerioId !== undefined) diacono.ministerioId = data.ministerioId || "";
     diacono.funcaoMinisterio = data.funcaoMinisterio;
     diacono.casado = data.casado;
     diacono.conjugeNome = data.conjugeNome;
@@ -550,11 +584,16 @@ window.DiaconiaUI = (() => {
           : `<span class="muted">Não informado</span>`
       }</dd>`
     );
+    const stPreview = opts.state || { ministerios: opts.ministerios || [] };
+    const minLabel = [
+      diacono.ministerioId ? nomeMinisterio(stPreview, diacono.ministerioId) : "",
+      diacono.funcaoMinisterio || "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
     linhas.push(
       `<dt>Ministério</dt><dd>${
-        diacono.funcaoMinisterio
-          ? esc(diacono.funcaoMinisterio)
-          : `<span class="muted">Não informado</span>`
+        minLabel ? esc(minLabel) : `<span class="muted">Não informado</span>`
       }</dd>`
     );
 
@@ -724,6 +763,8 @@ window.DiaconiaUI = (() => {
     equipeNomeDefinido,
     nomeEquipePublico,
     nomeFuncao,
+    nomeMinisterio,
+    labelMinisterioDiacono,
     normalizeFilhos,
     filhosFormHtml,
     bindFilhosForm,

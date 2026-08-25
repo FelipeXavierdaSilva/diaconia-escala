@@ -22,6 +22,26 @@ window.DiaconiaEngine = (() => {
     return state.funcoes.find((f) => f.id === id);
   }
 
+  function getMinisterio(state, id) {
+    if (!id) return null;
+    return (state.ministerios || []).find((m) => m.id === id) || null;
+  }
+
+  /** Ministério ativo do diácono (com horário). */
+  function ministerioDoDiacono(state, diacono) {
+    if (!diacono?.ministerioId) return null;
+    const m = getMinisterio(state, diacono.ministerioId);
+    return m && m.ativo !== false ? m : null;
+  }
+
+  /** True se o horário da função da diaconia conflita com o ministério do diácono. */
+  function conflitoHorarioMinisterio(state, diacono, funcao) {
+    if (state.configuracoes?.geracao?.respeitarHorarioMinisterio === false) return false;
+    const m = ministerioDoDiacono(state, diacono);
+    if (!m || !funcao) return false;
+    return Cal().horarioConflitaComJanela(funcao.horario, m.horarioInicio, m.horarioFim);
+  }
+
   function diaconosDaEquipe(state, equipeId) {
     return state.diaconos.filter((d) => d.equipeId === equipeId && d.ativo !== false);
   }
@@ -70,18 +90,102 @@ window.DiaconiaEngine = (() => {
     return diacono.funcoesPermitidas.includes(funcaoId);
   }
 
-  function candidatoValido(state, diacono, data, funcaoId, usadosNoDia) {
+  /** Funções que, por padrão, só podem ser preenchidas por um casal cadastrado. */
+  const FUNCOES_EXIGEM_CASAL_PADRAO = ["aconselhamento", "fechar_templo"];
+
+  function funcoesExigemCasalIds(state) {
+    const g = state?.configuracoes?.geracao;
+    if (Array.isArray(g?.funcoesExigemCasal) && g.funcoesExigemCasal.length) {
+      return g.funcoesExigemCasal;
+    }
+    return FUNCOES_EXIGEM_CASAL_PADRAO;
+  }
+
+  function exigeCasal(stateOrId, maybeId) {
+    // Compat: exigeCasal(funcaoId) legado → usa padrão; exigeCasal(state, funcaoId) preferido
+    if (typeof stateOrId === "string" && maybeId === undefined) {
+      return FUNCOES_EXIGEM_CASAL_PADRAO.includes(stateOrId);
+    }
+    const state = stateOrId;
+    const funcaoId = maybeId;
+    return funcoesExigemCasalIds(state).includes(funcaoId);
+  }
+
+  function parCasalValido(state, idA, idB) {
+    if (!idA || !idB || idA === idB) return false;
+    return casaisAtivos(state).some(
+      (c) =>
+        !c.naoServirJuntos &&
+        ((c.diaconoIdA === idA && c.diaconoIdB === idB) ||
+          (c.diaconoIdA === idB && c.diaconoIdB === idA))
+    );
+  }
+
+  /** Casal marcado para não servir juntos na diaconia no mesmo culto. */
+  function casalNaoServeJuntos(state, diaconoId) {
+    const info = infoCasal(state, diaconoId);
+    return !!(info?.casal?.naoServirJuntos && info.parceiroId);
+  }
+
+  /**
+   * @param {object} [opts]
+   * @param {boolean} [opts.permitirReuso] — se true, ignora usadosNoDia (acúmulo de funções)
+   * @param {Set} [opts.jaNaFuncao]
+   */
+  function candidatoValido(state, diacono, data, funcaoId, usadosNoDia, opts = {}) {
     if (!diacono || diacono.ativo === false) return false;
     if (!podeParticipar(state, diacono.id, data)) return false;
-    if (usadosNoDia.has(diacono.id)) return false;
+    if (!opts.permitirReuso && usadosNoDia && usadosNoDia.has(diacono.id)) return false;
     if (!temFuncaoPermitida(diacono, funcaoId)) return false;
     if (funcoesBloqueadas(state, diacono.id, data).has(funcaoId)) return false;
+    // Casal "não servir juntos": se o cônjuge já está no culto, este não entra
+    if (usadosNoDia && usadosNoDia.size) {
+      const info = infoCasal(state, diacono.id);
+      if (info?.casal?.naoServirJuntos && usadosNoDia.has(info.parceiroId)) return false;
+    }
     const chegada = chegadaMaxima(state, diacono.id, data);
     const funcao = getFuncao(state, funcaoId);
     if (chegada && funcao && !Cal().horarioCompativel(chegada, funcao.horario)) {
       return false;
     }
+    if (conflitoHorarioMinisterio(state, diacono, funcao)) return false;
+    // Já atribuído a esta função nesta equipe (evita duplicar no mesmo slot)
+    if (opts.jaNaFuncao instanceof Set && opts.jaNaFuncao.has(diacono.id)) return false;
     return true;
+  }
+
+  function funcoesPadraoAtivas(state) {
+    const padrao = state.funcoesPadraoCulto || [];
+    return padrao.filter((id) => {
+      const f = getFuncao(state, id);
+      return f && f.ativo !== false;
+    });
+  }
+
+  /** Funções do padrão que cabem nesta data (ativo + recorrência). */
+  function funcoesParaData(state, dataISO) {
+    return funcoesPadraoAtivas(state).filter((id) => {
+      const f = getFuncao(state, id);
+      return Cal().funcaoEncaixaNaData(f, dataISO);
+    });
+  }
+
+  function validarParFuncaoCasal(state, funcaoId, ids) {
+    if (!exigeCasal(state, funcaoId)) return { ok: true };
+    const lista = (ids || []).filter(Boolean);
+    if (lista.length < 2) {
+      return {
+        ok: false,
+        erro: "Esta função exige um casal (mínimo 2 pessoas cadastradas como casal).",
+      };
+    }
+    if (!parCasalValido(state, lista[0], lista[1])) {
+      return {
+        ok: false,
+        erro: "Nesta função só pode ficar um casal cadastrado — não dois solteiros nem casado com outra pessoa.",
+      };
+    }
+    return { ok: true };
   }
 
   /** Contagem histórica de atribuições (equilíbrio geral) */
@@ -165,6 +269,12 @@ window.DiaconiaEngine = (() => {
       maxEscalasPorDiaconoNoMes: Math.max(0, +g.maxEscalasPorDiaconoNoMes || 0),
       maxPessoasPorCulto: Math.max(0, +g.maxPessoasPorCulto || 0),
       maxPessoasPorEvento: Math.max(0, +g.maxPessoasPorEvento || 0),
+      permitirAcumularFuncoes: g.permitirAcumularFuncoes !== false,
+      respeitarHorarioMinisterio: g.respeitarHorarioMinisterio !== false,
+      priorizarSemMinisterio: g.priorizarSemMinisterio !== false,
+      funcoesExigemCasal: Array.isArray(g.funcoesExigemCasal)
+        ? [...g.funcoesExigemCasal]
+        : [...FUNCOES_EXIGEM_CASAL_PADRAO],
     };
   }
 
@@ -218,8 +328,9 @@ window.DiaconiaEngine = (() => {
 
   /**
    * Gera atribuições para uma equipe em uma data.
-   * Respeita configuracoes.geracao (rodízio de funções, limites, etc.).
-   * Casais: preferirMesmoDia / preferirMesmaFuncao quando respeitarCasais está ativo.
+   * 1) Funções que exigem casal (aconselhamento, fechar_templo)
+   * 2) Demais funções sem reutilizar pessoa
+   * 3) 2ª passagem: acumula funções se ainda faltarem vagas
    */
   function gerarEquipe(state, escala, equipeId, historicoBase) {
     const data = escala.data;
@@ -255,6 +366,7 @@ window.DiaconiaEngine = (() => {
 
     function atribuir(fid, diaconoId) {
       if (!atribuicoes[fid]) atribuicoes[fid] = [];
+      if (atribuicoes[fid].includes(diaconoId)) return;
       atribuicoes[fid].push(diaconoId);
       usados.add(diaconoId);
       hist[diaconoId] = (hist[diaconoId] || 0) + 1;
@@ -270,6 +382,9 @@ window.DiaconiaEngine = (() => {
       if (cfg.variarFuncoesNoMes) score += (histFuncao[d.id]?.[fid] || 0) * 4;
       if (cfg.evitarMesmaFuncaoConsecutiva && ultimaFn[d.id] === fid) score += 12;
       score += (histMes[d.id] || 0) * 0.5;
+      if (usados.has(d.id)) score += 20; // preferir quem ainda não foi escalado hoje
+      // Quem tem outro ministério: leve prioridade menor (não sobrecarregar quem só está na diaconia)
+      if (cfg.priorizarSemMinisterio && ministerioDoDiacono(state, d)) score += 2.5;
       return score;
     }
 
@@ -278,38 +393,98 @@ window.DiaconiaEngine = (() => {
       return (histMes[d.id] || 0) < cfg.maxEscalasPorDiaconoNoMes;
     }
 
+    function elegivel(d, fid, opts = {}) {
+      return (
+        dentroDoLimiteMensal(d) &&
+        candidatoValido(state, d, data, fid, usados, {
+          permitirReuso: !!opts.permitirReuso,
+          jaNaFuncao: new Set(atribuicoes[fid] || []),
+        })
+      );
+    }
+
     function colocarParceiroSePossivel(diaconoId, funcaoAtualId) {
       if (!usarCasais || atingiuLimitePessoas()) return;
+      if (exigeCasal(state, funcaoAtualId)) return; // já tratado em bloco de casal
       const info = infoCasal(state, diaconoId);
       if (!info?.casal?.preferirMesmoDia) return;
+      if (info.casal.naoServirJuntos) return;
       const parceiro = membros.find((d) => d.id === info.parceiroId);
       if (!parceiro || usados.has(parceiro.id)) return;
       if (!podeParticipar(state, parceiro.id, data)) return;
       if (!dentroDoLimiteMensal(parceiro)) return;
 
       if (info.casal.preferirMesmaFuncao && slotsLivres(funcaoAtualId) > 0) {
-        if (candidatoValido(state, parceiro, data, funcaoAtualId, usados)) {
+        if (elegivel(parceiro, funcaoAtualId)) {
           atribuir(funcaoAtualId, parceiro.id);
           return;
         }
       }
 
       const outras = shuffle(
-        funcoesIds.filter((fid) => fid !== funcaoAtualId && slotsLivres(fid) > 0)
+        funcoesIds.filter(
+          (fid) => fid !== funcaoAtualId && !exigeCasal(state, fid) && slotsLivres(fid) > 0
+        )
       );
       for (const fid of outras) {
         if (atingiuLimitePessoas()) return;
-        if (candidatoValido(state, parceiro, data, fid, usados)) {
+        if (elegivel(parceiro, fid)) {
           atribuir(fid, parceiro.id);
           return;
         }
       }
     }
 
-    // 1) Casais com preferirMesmaFuncao
+    /** Preenche funções que exigem casal com pares cadastrados. */
+    function preencherFuncoesCasal(permitirReuso) {
+      const fids = funcoesIds.filter((fid) => exigeCasal(state, fid) && getFuncao(state, fid));
+      for (const fid of fids) {
+        while (slotsLivres(fid) >= 2) {
+          if (maxPessoas > 0 && usados.size >= maxPessoas && !permitirReuso) break;
+
+          const casaisEq = shuffle(casaisDaEquipe(state, equipeId));
+          let colocado = false;
+          // Preferir casal que já está no dia / já em outra função de casal
+          const ordenados = [...casaisEq].sort((c1, c2) => {
+            const s = (c) =>
+              (usados.has(c.diaconoIdA) ? 1 : 0) + (usados.has(c.diaconoIdB) ? 1 : 0);
+            return s(c2) - s(c1);
+          });
+
+          for (const casal of ordenados) {
+            if (casal.naoServirJuntos) continue;
+            const a = membros.find((d) => d.id === casal.diaconoIdA);
+            const b = membros.find((d) => d.id === casal.diaconoIdB);
+            if (!a || !b) continue;
+            if (!elegivel(a, fid, { permitirReuso }) || !elegivel(b, fid, { permitirReuso })) {
+              continue;
+            }
+            if (
+              maxPessoas > 0 &&
+              !permitirReuso &&
+              !usados.has(a.id) &&
+              !usados.has(b.id) &&
+              usados.size + 2 > maxPessoas
+            ) {
+              continue;
+            }
+            atribuir(fid, a.id);
+            atribuir(fid, b.id);
+            colocado = true;
+            break;
+          }
+          if (!colocado) break;
+        }
+      }
+    }
+
+    // 0) Aconselhamento + Fechar templo (casais) — 1ª tentativa sem reuso
+    preencherFuncoesCasal(false);
+
+    // 1) Casais com preferirMesmaFuncao (funções que NÃO exigem casal)
     if (usarCasais && !atingiuLimitePessoas()) {
       const casaisEq = casaisDaEquipe(state, equipeId).filter(
-        (c) => c.preferirMesmoDia && c.preferirMesmaFuncao
+        (c) => c.preferirMesmoDia && c.preferirMesmaFuncao && !c.naoServirJuntos
       );
       for (const casal of shuffle(casaisEq)) {
         if (atingiuLimitePessoas()) break;
@@ -321,12 +496,13 @@ window.DiaconiaEngine = (() => {
         if (maxPessoas > 0 && usados.size + 2 > maxPessoas) continue;
 
         const fidOk = shuffle(funcoesIds).find((fid) => {
+          if (exigeCasal(state, fid)) return false;
           const f = getFuncao(state, fid);
           return (
             (f?.qtdPorEquipe || 1) >= 2 &&
             slotsLivres(fid) >= 2 &&
-            candidatoValido(state, a, data, fid, usados) &&
-            candidatoValido(state, b, data, fid, new Set([...usados, a.id]))
+            elegivel(a, fid) &&
+            elegivel(b, fid)
           );
         });
         if (fidOk) {
@@ -336,20 +512,16 @@ window.DiaconiaEngine = (() => {
       }
     }
 
-    // 2) Preencher funções com equilíbrio + rodízio
-    for (const fid of funcoesIds) {
+    // 2) Preencher demais funções sem reuso
+    const funcoesNormais = funcoesIds.filter((fid) => !exigeCasal(state, fid));
+    for (const fid of funcoesNormais) {
       const funcao = getFuncao(state, fid);
       if (!funcao) continue;
       const qtd = funcao.qtdPorEquipe || 1;
 
       while ((atribuicoes[fid]?.length || 0) < qtd) {
         if (atingiuLimitePessoas()) break;
-        const candidatos = shuffle(
-          membros.filter(
-            (d) =>
-              dentroDoLimiteMensal(d) && candidatoValido(state, d, data, fid, usados)
-          )
-        ).sort((x, y) => {
+        const candidatos = shuffle(membros.filter((d) => elegivel(d, fid))).sort((x, y) => {
           const px = prioridadeCasal(state, x.id, usados);
           const py = prioridadeCasal(state, y.id, usados);
           if (px !== py) return px - py;
@@ -363,10 +535,10 @@ window.DiaconiaEngine = (() => {
       }
     }
 
-    // 3) Última chance: cônjuge ainda de fora
+    // 3) Última chance: cônjuge ainda de fora (funções normais)
     if (usarCasais && !atingiuLimitePessoas()) {
       for (const casal of casaisDaEquipe(state, equipeId)) {
-        if (!casal.preferirMesmoDia || atingiuLimitePessoas()) continue;
+        if (!casal.preferirMesmoDia || casal.naoServirJuntos || atingiuLimitePessoas()) continue;
         const ids = [casal.diaconoIdA, casal.diaconoIdB];
         const noDia = ids.filter((id) => usados.has(id));
         const fora = ids.find((id) => !usados.has(id));
@@ -374,38 +546,79 @@ window.DiaconiaEngine = (() => {
         const parceiro = membros.find((d) => d.id === fora);
         if (!parceiro || !podeParticipar(state, fora, data)) continue;
         if (!dentroDoLimiteMensal(parceiro)) continue;
-        const fid = shuffle(funcoesIds).find(
-          (f) => slotsLivres(f) > 0 && candidatoValido(state, parceiro, data, f, usados)
-        );
+        const fid = shuffle(funcoesNormais).find((f) => slotsLivres(f) > 0 && elegivel(parceiro, f));
         if (fid) atribuir(fid, fora);
+      }
+    }
+
+    // 4) 2ª passagem: acumular funções (reuso) — casais primeiro, depois normais
+    if (cfg.permitirAcumularFuncoes) {
+      preencherFuncoesCasal(true);
+
+      for (const fid of funcoesNormais) {
+        const funcao = getFuncao(state, fid);
+        if (!funcao) continue;
+        const qtd = funcao.qtdPorEquipe || 1;
+        while ((atribuicoes[fid]?.length || 0) < qtd) {
+          const candidatos = shuffle(
+            membros.filter((d) => elegivel(d, fid, { permitirReuso: true }))
+          ).sort((x, y) => scoreCandidato(x, fid) - scoreCandidato(y, fid));
+          if (!candidatos.length) break;
+          atribuir(fid, candidatos[0].id);
+        }
       }
     }
 
     for (const fid of funcoesIds) {
       const funcao = getFuncao(state, fid);
       if (!funcao) continue;
-      const qtd = funcao.qtdPorEquipe || 1;
-      if ((atribuicoes[fid]?.length || 0) < qtd) {
-        const porLimite = atingiuLimitePessoas();
+      const qtd = Math.max(funcao.qtdPorEquipe || 1, exigeCasal(state, fid) ? 2 : 1);
+      const ids = atribuicoes[fid] || [];
+      if (ids.length < qtd) {
+        const porLimite = atingiuLimitePessoas() && ids.length === 0;
+        const faltaCasal = exigeCasal(state, fid);
         problemas.push({
           equipeId,
           funcaoId: fid,
           necessario: qtd,
-          obtido: atribuicoes[fid].length,
+          obtido: ids.length,
           mensagem: porLimite
             ? `A função ${funcao.nome} ficou incompleta pelo limite de pessoas configurado para este tipo de evento.`
-            : `A função ${funcao.nome} precisa de ${qtd} pessoa(s), mas só há ${atribuicoes[fid].length} disponível(eis) autorizado(s).`,
+            : faltaCasal
+              ? `A função ${funcao.nome} precisa de um casal cadastrado (2 pessoas). Só há ${ids.length}.`
+              : `A função ${funcao.nome} precisa de ${qtd} pessoa(s), mas só há ${ids.length} disponível(eis) autorizado(s).`,
           sugestoes: porLimite
             ? [
                 "Aumente o máximo de pessoas em Configurações → Regras de geração.",
                 "Ou reduza a quantidade exigida na função.",
               ]
-            : [
-                "Autorizar outro diácono para a função.",
-                "Adicionar um diácono à equipe.",
-                "Revisar restrições aprovadas desta data.",
-              ],
+            : faltaCasal
+              ? [
+                  "Cadastre o casal em Casais (mesma equipe).",
+                  "Ou desative esta função neste culto em Editar data e equipe.",
+                  "Revise restrições aprovadas desta data.",
+                ]
+              : [
+                  "Autorizar outro diácono para a função.",
+                  "Adicionar um diácono à equipe.",
+                  "Revisar restrições aprovadas desta data.",
+                ],
         });
+      } else if (exigeCasal(state, fid)) {
+        const v = validarParFuncaoCasal(state, fid, ids);
+        if (!v.ok) {
+          problemas.push({
+            equipeId,
+            funcaoId: fid,
+            necessario: qtd,
+            obtido: ids.length,
+            mensagem: `${funcao.nome}: ${v.erro}`,
+            sugestoes: [
+              "Substitua por um casal cadastrado.",
+              "Ou monte manualmente com o casal correto.",
+            ],
+          });
+        }
       }
     }
 
@@ -516,7 +729,15 @@ window.DiaconiaEngine = (() => {
     datas.forEach((data, i) => {
       if (state.escalas[data]) return;
       const eq = eqs[(start + i) % eqs.length];
-      state.escalas[data] = Seed.criarEscalaBase(data, "culto", "Culto", horario, [eq]);
+      const fids = funcoesParaData(state, data);
+      state.escalas[data] = Seed.criarEscalaBase(
+        data,
+        "culto",
+        "Culto",
+        horario,
+        [eq],
+        fids.length ? fids : funcoesPadraoAtivas(state)
+      );
       criadas += 1;
     });
     return criadas;
@@ -562,7 +783,15 @@ window.DiaconiaEngine = (() => {
     datas.forEach((data, i) => {
       if (state.escalas[data]) return;
       const eq = eqs.length ? eqs[(start + i) % eqs.length] : "eq01";
-      state.escalas[data] = Seed.criarEscalaBase(data, "culto", "Culto", horario, [eq]);
+      const fids = funcoesParaData(state, data);
+      state.escalas[data] = Seed.criarEscalaBase(
+        data,
+        "culto",
+        "Culto",
+        horario,
+        [eq],
+        fids.length ? fids : funcoesPadraoAtivas(state)
+      );
       criadas += 1;
     });
     return { datas: datas.length, criadas };
@@ -614,7 +843,11 @@ window.DiaconiaEngine = (() => {
     // manter atribuição manual, só validar problemas
     const funcao = getFuncao(state, funcaoId);
     if (!funcao) return { ok: false, erro: "Função não encontrada." };
-    const qtd = funcao.qtdPorEquipe || 1;
+    const qtd = Math.max(funcao.qtdPorEquipe || 1, exigeCasal(state, funcaoId) ? 2 : 1);
+    if (exigeCasal(state, funcaoId) && novosIds.length >= 2) {
+      const v = validarParFuncaoCasal(state, funcaoId, novosIds);
+      if (!v.ok) return { ok: false, erro: v.erro };
+    }
     escala.problemas = (escala.problemas || []).filter(
       (p) => !(p.equipeId === equipeId && p.funcaoId === funcaoId)
     );
@@ -624,7 +857,9 @@ window.DiaconiaEngine = (() => {
         funcaoId,
         necessario: qtd,
         obtido: novosIds.length,
-        mensagem: `A função ${funcao.nome} precisa de ${qtd} pessoa(s).`,
+        mensagem: exigeCasal(state, funcaoId)
+          ? `A função ${funcao.nome} precisa de um casal cadastrado (2 pessoas).`
+          : `A função ${funcao.nome} precisa de ${qtd} pessoa(s).`,
         sugestoes: regen.problemas[0]?.sugestoes || ["Completar a atribuição."],
       });
     }
@@ -643,11 +878,12 @@ window.DiaconiaEngine = (() => {
     const funcoesIds = escala.funcoesIds || state.funcoesPadraoCulto;
     const limpas = {};
     const problemas = [];
+    const noDia = new Set();
 
     for (const fid of funcoesIds) {
       const funcao = getFuncao(state, fid);
       if (!funcao) continue;
-      const qtd = funcao.qtdPorEquipe || 1;
+      const qtd = Math.max(funcao.qtdPorEquipe || 1, exigeCasal(state, fid) ? 2 : 1);
       const raw = (atribuicoesEq[fid] || []).filter(Boolean);
       const ids = [];
 
@@ -657,7 +893,19 @@ window.DiaconiaEngine = (() => {
         }
         const d = state.diaconos.find((x) => x.id === id);
         if (!d) return { ok: false, erro: "Diácono não encontrado." };
-        if (!candidatoValido(state, d, data, fid, new Set())) {
+        if (
+          !candidatoValido(state, d, data, fid, noDia, {
+            permitirReuso: true,
+            jaNaFuncao: new Set(ids),
+          })
+        ) {
+          const info = infoCasal(state, d.id);
+          if (info?.casal?.naoServirJuntos && noDia.has(info.parceiroId)) {
+            return {
+              ok: false,
+              erro: `${d.nome} não pode servir neste culto junto com o cônjuge (casal marcado para não servir juntos na diaconia).`,
+            };
+          }
           return {
             ok: false,
             erro: `${d.nome} não pode ficar em ${funcao.nome} nesta data (restrição, horário ou permissão).`,
@@ -666,15 +914,25 @@ window.DiaconiaEngine = (() => {
         ids.push(id);
       }
 
+      if (exigeCasal(state, fid) && ids.length >= 2) {
+        const v = validarParFuncaoCasal(state, fid, ids);
+        if (!v.ok) return { ok: false, erro: `${funcao.nome}: ${v.erro}` };
+      }
+
       limpas[fid] = ids;
+      for (const id of ids) noDia.add(id);
       if (ids.length < qtd) {
         problemas.push({
           equipeId,
           funcaoId: fid,
           necessario: qtd,
           obtido: ids.length,
-          mensagem: `A função ${funcao.nome} precisa de ${qtd} pessoa(s), mas só há ${ids.length} selecionada(s).`,
-          sugestoes: ["Completar a atribuição manualmente.", "Ou usar Gerar/Embaralhar depois."],
+          mensagem: exigeCasal(state, fid)
+            ? `A função ${funcao.nome} precisa de um casal cadastrado (2 pessoas).`
+            : `A função ${funcao.nome} precisa de ${qtd} pessoa(s), mas só há ${ids.length} selecionada(s).`,
+          sugestoes: exigeCasal(state, fid)
+            ? ["Selecione os dois membros de um casal cadastrado."]
+            : ["Completar a atribuição manualmente.", "Ou usar Gerar/Embaralhar depois."],
         });
       }
     }
@@ -797,6 +1055,7 @@ window.DiaconiaEngine = (() => {
   /**
    * Atualiza data e/ou equipe responsável de uma escala.
    * Se a equipe mudar, limpa atribuições daquele dia.
+   * Se funcoesIds mudar, remove atribuições/problemas das funções desmarcadas.
    */
   function atualizarEscalaDia(state, dataAtual, payload = {}) {
     const esc = state.escalas[dataAtual];
@@ -817,6 +1076,27 @@ window.DiaconiaEngine = (() => {
     if (payload.horario !== undefined) esc.horario = payload.horario;
     if (payload.tipo !== undefined) esc.tipo = payload.tipo;
     if (payload.descricao !== undefined) esc.descricao = payload.descricao;
+
+    let funcoesMudou = false;
+    if (Array.isArray(payload.funcoesIds)) {
+      const novas = [...new Set(payload.funcoesIds.filter(Boolean))];
+      if (!novas.length) return { ok: false, erro: "Selecione ao menos uma função." };
+      const antigas = esc.funcoesIds || [];
+      funcoesMudou =
+        novas.length !== antigas.length || novas.some((id) => !antigas.includes(id));
+      esc.funcoesIds = novas;
+      const keep = new Set(novas);
+      for (const eq of Object.values(esc.atribuicoes || {})) {
+        for (const fid of Object.keys(eq || {})) {
+          if (!keep.has(fid)) delete eq[fid];
+        }
+      }
+      esc.problemas = (esc.problemas || []).filter((p) => keep.has(p.funcaoId));
+      if (funcoesMudou) {
+        esc.gerada = false;
+        esc.status = statusEscala(esc, state);
+      }
+    }
 
     if (equipeMudou) {
       esc.equipesIds = [novaEquipe];
@@ -850,6 +1130,7 @@ window.DiaconiaEngine = (() => {
       escala: esc,
       equipeMudou,
       dataMudou,
+      funcoesMudou,
     };
   }
 
@@ -864,6 +1145,9 @@ window.DiaconiaEngine = (() => {
     uid,
     shuffle,
     getFuncao,
+    getMinisterio,
+    ministerioDoDiacono,
+    conflitoHorarioMinisterio,
     diaconosDaEquipe,
     restricoesAtivas,
     restricoesPara,
@@ -872,6 +1156,13 @@ window.DiaconiaEngine = (() => {
     chegadaMaxima,
     candidatoValido,
     candidatosParaFuncao,
+    exigeCasal,
+    funcoesExigemCasalIds,
+    parCasalValido,
+    validarParFuncaoCasal,
+    casalNaoServeJuntos,
+    funcoesPadraoAtivas,
+    funcoesParaData,
     contagemHistorico,
     cfgGeracao,
     statusEquipe,

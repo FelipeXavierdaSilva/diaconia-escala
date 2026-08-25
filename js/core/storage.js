@@ -71,6 +71,28 @@ window.DiaconiaStorage = (() => {
   function migrate(state) {
     if (!state || typeof state !== "object") return state;
     if (!Array.isArray(state.casais)) state.casais = [];
+    if (!Array.isArray(state.ministerios)) state.ministerios = [];
+    if (!Array.isArray(state.comunicados)) state.comunicados = [];
+    for (const c of state.comunicados) {
+      if (c.ativo === undefined) c.ativo = true;
+      if (!c.texto) c.texto = "";
+    }
+    for (const m of state.ministerios) {
+      if (m.ativo === undefined) m.ativo = true;
+      if (!m.horarioInicio) m.horarioInicio = "18:00";
+      if (!m.horarioFim) m.horarioFim = "21:00";
+    }
+    for (const d of state.diaconos || []) {
+      if (d.ministerioId === undefined) d.ministerioId = "";
+      // Tenta vincular texto antigo ao catálogo (só se ainda não tiver id)
+      if (!d.ministerioId && d.funcaoMinisterio) {
+        const txt = String(d.funcaoMinisterio).trim().toLowerCase();
+        const hit = state.ministerios.find(
+          (m) => m.ativo !== false && m.nome && txt.includes(String(m.nome).toLowerCase())
+        );
+        if (hit) d.ministerioId = hit.id;
+      }
+    }
     if (!state.configuracoes) state.configuracoes = {};
     if (state.configuracoes.respeitarCasais === undefined) {
       state.configuracoes.respeitarCasais = true;
@@ -89,11 +111,41 @@ window.DiaconiaStorage = (() => {
     if (g.maxEscalasPorDiaconoNoMes === undefined) g.maxEscalasPorDiaconoNoMes = 0;
     if (g.maxPessoasPorCulto === undefined) g.maxPessoasPorCulto = 0;
     if (g.maxPessoasPorEvento === undefined) g.maxPessoasPorEvento = 0;
+    if (g.permitirAcumularFuncoes === undefined) g.permitirAcumularFuncoes = true;
+    if (g.respeitarHorarioMinisterio === undefined) g.respeitarHorarioMinisterio = true;
+    if (g.priorizarSemMinisterio === undefined) g.priorizarSemMinisterio = true;
+    if (!Array.isArray(g.funcoesExigemCasal)) {
+      g.funcoesExigemCasal = ["aconselhamento", "fechar_templo"].filter((id) =>
+        (state.funcoes || []).some((f) => f.id === id)
+      );
+      if (!g.funcoesExigemCasal.length) g.funcoesExigemCasal = ["aconselhamento", "fechar_templo"];
+    }
     if (!state.meta) state.meta = {};
 
-    // Contar Oferta: alinhar qtd com instrução (2 pessoas)
+    // Contar Oferta / Aconselhamento / Fechar templo: mínimo 2 pessoas
+    for (const f of state.funcoes || []) {
+      if (f.ativo === undefined) f.ativo = true;
+      if (f.recorrencia === undefined) {
+        f.recorrencia = f.id === "mesa_ceia" ? "primeiro_domingo" : "sempre";
+      }
+    }
     const of = (state.funcoes || []).find((f) => f.id === "contar_oferta");
     if (of && of.qtdPorEquipe < 2) of.qtdPorEquipe = 2;
+    for (const id of ["aconselhamento", "fechar_templo"]) {
+      const fn = (state.funcoes || []).find((f) => f.id === id);
+      if (fn && (fn.qtdPorEquipe || 1) < 2) fn.qtdPorEquipe = 2;
+    }
+    // Incluir mesa_ceia no padrão se existir e ainda não estiver
+    if (Array.isArray(state.funcoesPadraoCulto)) {
+      const temMesa = (state.funcoes || []).some((f) => f.id === "mesa_ceia");
+      if (temMesa && !state.funcoesPadraoCulto.includes("mesa_ceia")) {
+        state.funcoesPadraoCulto.push("mesa_ceia");
+      }
+      state.funcoesPadraoCulto = state.funcoesPadraoCulto.filter((id) => {
+        const f = (state.funcoes || []).find((x) => x.id === id);
+        return f && f.ativo !== false;
+      });
+    }
 
     // Migra escalas antigas (2 equipes no mesmo dia) → 1 equipe responsável por data
     if (!state.meta.modeloEquipePorDia) {
@@ -147,6 +199,11 @@ window.DiaconiaStorage = (() => {
       if (eq.nomeDefinido === undefined) eq.nomeDefinido = false;
     }
 
+    // Casais: flag "não servir juntos na diaconia"
+    for (const c of state.casais || []) {
+      if (c.naoServirJuntos === undefined) c.naoServirJuntos = false;
+    }
+
     // Escalas: só entram no PDF as marcadas pelo botão Gerar escala
     for (const esc of Object.values(state.escalas || {})) {
       if (esc.gerada === undefined) esc.gerada = false;
@@ -190,6 +247,7 @@ window.DiaconiaStorage = (() => {
           filhos: [],
           filhosNomes: [],
           filhosVaoIgreja: false,
+          ministerioId: "",
           funcoesPermitidas: ["*"],
           ativo: true,
         });

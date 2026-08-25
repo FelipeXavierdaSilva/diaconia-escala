@@ -289,9 +289,32 @@ window.DiaconiaEscalaModal = (() => {
       )
       .join("");
 
+    const selecionadas = new Set(esc.funcoesIds || state.funcoesPadraoCulto || []);
+    const labelRec = (r) => {
+      const map = {
+        sempre: "todo culto",
+        primeiro_domingo: "1º domingo",
+        segundo_domingo: "2º domingo",
+        terceiro_domingo: "3º domingo",
+        quarto_domingo: "4º domingo",
+        ultimo_domingo: "último domingo",
+      };
+      return map[r || "sempre"] || "todo culto";
+    };
+    const funs = (state.funcoes || [])
+      .filter((f) => f.ativo !== false || selecionadas.has(f.id))
+      .map((f) => {
+        const hint =
+          f.recorrencia && f.recorrencia !== "sempre"
+            ? ` <span class="muted">(${UI().esc(labelRec(f.recorrencia))})</span>`
+            : "";
+        return `<label><input type="checkbox" name="fn-dia" value="${f.id}" ${selecionadas.has(f.id) ? "checked" : ""}/> ${UI().esc(f.emoji + " " + f.nome)}${hint}</label>`;
+      })
+      .join("");
+
     UI().openModal(`
       <h2>✏️ Editar data e equipe</h2>
-      <p class="muted">Altere o dia da escala e/ou a equipe responsável.</p>
+      <p class="muted">Altere o dia, a equipe e quais funções entram neste culto.</p>
       <label class="field"><span>Data</span><input type="date" id="ed-data" value="${UI().esc(data)}"/></label>
       <label class="field"><span>Nome</span><input id="ed-nome" value="${UI().esc(esc.nome || "")}"/></label>
       <label class="field"><span>Horário</span><input id="ed-hora" value="${UI().esc(esc.horario || "18:00")}"/></label>
@@ -304,7 +327,10 @@ window.DiaconiaEscalaModal = (() => {
       </label>
       <p><strong>Equipe responsável do dia</strong></p>
       <div class="radio-list">${eqs}</div>
-      <div class="alert alert-warn">Se mudar a equipe, as atribuições deste dia serão limpas (gere a escala de novo).</div>
+      <p><strong>Funções deste culto</strong></p>
+      <p class="muted" style="font-size:12px;margin-top:-4px">Desmarque o que não precisa neste dia (ex.: Mesa de Ceia fora do 1º domingo, ou o contrário).</p>
+      <div class="check-list" style="max-height:160px;overflow:auto">${funs}</div>
+      <div class="alert alert-warn">Se mudar a equipe, as atribuições deste dia serão limpas (gere a escala de novo). Mudar funções remove as pessoas das funções desmarcadas.</div>
       <div class="modal-actions">
         <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
         <button class="btn btn-accent" data-act="salvar">Salvar</button>
@@ -323,8 +349,10 @@ window.DiaconiaEscalaModal = (() => {
 
       const novaData = m.querySelector("#ed-data").value;
       const equipeId = m.querySelector('input[name="eq-dia"]:checked')?.value;
+      const funcoesIds = [...m.querySelectorAll('input[name="fn-dia"]:checked')].map((i) => i.value);
       if (!novaData) return UI().toast("Informe a data.");
       if (!equipeId) return UI().toast("Selecione a equipe.");
+      if (!funcoesIds.length) return UI().toast("Selecione ao menos uma função.");
 
       const res = Engine().atualizarEscalaDia(state, data, {
         data: novaData,
@@ -332,6 +360,7 @@ window.DiaconiaEscalaModal = (() => {
         nome: m.querySelector("#ed-nome").value.trim() || esc.nome,
         horario: m.querySelector("#ed-hora").value.trim() || esc.horario,
         tipo: m.querySelector("#ed-tipo").value,
+        funcoesIds,
       });
 
       if (!res.ok) return UI().toast(res.erro);
@@ -345,11 +374,10 @@ window.DiaconiaEscalaModal = (() => {
       UI().closeModal();
       onChange?.();
       render(state, res.data, { diaconoId, isLider, onChange });
-      UI().toast(
-        res.equipeMudou
-          ? "Salvo. Equipe alterada — gere/embaralhe as funções deste dia."
-          : "Data e equipe atualizadas."
-      );
+      let msg = "Data e equipe atualizadas.";
+      if (res.equipeMudou) msg = "Salvo. Equipe alterada — gere/embaralhe as funções deste dia.";
+      else if (res.funcoesMudou) msg = "Salvo. Funções alteradas — gere a escala de novo se precisar.";
+      UI().toast(msg);
     });
   }
 

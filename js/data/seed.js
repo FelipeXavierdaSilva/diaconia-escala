@@ -90,18 +90,18 @@ window.DiaconiaSeed = (() => {
       nome: "Aconselhamento",
       emoji: "📖",
       horario: "18:00",
-      qtdPorEquipe: 1,
+      qtdPorEquipe: 2,
       instrucoes:
-        "Estar disponível para aconselhamento pastoral de apoio. Discrição, acolhimento e encaminhamento adequado.",
+        "Estar disponível para aconselhamento pastoral de apoio. Preferencialmente um casal cadastrado. Discrição, acolhimento e encaminhamento adequado.",
     },
     {
       id: "fechar_templo",
       nome: "Fechar templo",
       emoji: "🔐",
       horario: "Final",
-      qtdPorEquipe: 1,
+      qtdPorEquipe: 2,
       instrucoes:
-        "Verificar luzes, ar-condicionado, portas e segurança ao encerrar. Confirmar que tudo foi fechado.",
+        "Verificar luzes, ar-condicionado, portas e segurança ao encerrar. Mínimo duas pessoas — preferencialmente um casal cadastrado.",
     },
     {
       id: "infantil",
@@ -143,12 +143,18 @@ window.DiaconiaSeed = (() => {
       emoji: "🍞",
       horario: "17:45",
       qtdPorEquipe: 2,
+      recorrencia: "primeiro_domingo",
       instrucoes:
-        "Preparar a mesa da ceia com reverência. Conferir utensílios e organização.",
+        "Preparar a mesa da ceia com reverência. Conferir utensílios e organização. Em geral no 1º domingo do mês (pode alterar no culto).",
     },
   ];
 
-  /** Conjunto padrão cabível em ~12 diáconos/equipe (ajustável nas Configurações/Funções) */
+  for (const f of FUNCOES) {
+    if (f.ativo === undefined) f.ativo = true;
+    if (f.recorrencia === undefined) f.recorrencia = "sempre";
+  }
+
+  /** Conjunto padrão (filtrado por recorrência na criação de cada culto) */
   const FUNCOES_PADRAO_CULTO = [
     "lanche",
     "janta",
@@ -161,6 +167,7 @@ window.DiaconiaSeed = (() => {
     "seguranca",
     "aconselhamento",
     "fechar_templo",
+    "mesa_ceia",
   ];
 
   const diaconos = [
@@ -195,6 +202,31 @@ window.DiaconiaSeed = (() => {
     { id: "eq02", nome: "Equipe 02", nomeDefinido: false, ativa: true },
   ];
 
+  /** Ministérios da igreja (horários ajudam a gerar a escala da diaconia). */
+  const ministerios = [
+    {
+      id: "min_infantil",
+      nome: "Infantil",
+      horarioInicio: "18:00",
+      horarioFim: "21:00",
+      ativo: true,
+    },
+    {
+      id: "min_louvor",
+      nome: "Louvor",
+      horarioInicio: "17:45",
+      horarioFim: "21:00",
+      ativo: true,
+    },
+    {
+      id: "min_recepcao",
+      nome: "Recepção",
+      horarioInicio: "17:30",
+      horarioFim: "19:00",
+      ativo: true,
+    },
+  ];
+
   /** Casais: preferir mesmo dia ≠ obrigar mesma função */
   const casais = [
     {
@@ -203,6 +235,7 @@ window.DiaconiaSeed = (() => {
       diaconoIdB: "d02",
       preferirMesmoDia: true,
       preferirMesmaFuncao: false,
+      naoServirJuntos: false,
       ativo: true,
       observacao: "Felipe e Helenita — preferem servir no mesmo culto, funções podem ser diferentes.",
     },
@@ -212,6 +245,7 @@ window.DiaconiaSeed = (() => {
       diaconoIdB: "d04",
       preferirMesmoDia: true,
       preferirMesmaFuncao: false,
+      naoServirJuntos: false,
       ativo: true,
       observacao: "David e Kênia",
     },
@@ -275,7 +309,14 @@ window.DiaconiaSeed = (() => {
     return datas;
   }
 
-  function criarEscalaBase(data, tipo = "culto", nome = "Culto", horario = "18:00", equipesIds = null) {
+  function criarEscalaBase(
+    data,
+    tipo = "culto",
+    nome = "Culto",
+    horario = "18:00",
+    equipesIds = null,
+    funcoesIds = null
+  ) {
     return {
       id: `esc_${data}`,
       data,
@@ -284,7 +325,7 @@ window.DiaconiaSeed = (() => {
       horario,
       /** Uma equipe responsável por este dia (padrão do sistema) */
       equipesIds: equipesIds && equipesIds.length ? [...equipesIds] : ["eq01"],
-      funcoesIds: [...FUNCOES_PADRAO_CULTO],
+      funcoesIds: funcoesIds?.length ? [...funcoesIds] : [...FUNCOES_PADRAO_CULTO],
       status: "rascunho",
       atribuicoes: {},
       problemas: [],
@@ -312,7 +353,22 @@ window.DiaconiaSeed = (() => {
     }
     const porDia = atribuirEquipesPorDia(todasDatas, equipes.filter((e) => e.ativa).map((e) => e.id));
     for (const data of todasDatas) {
-      escalas[data] = criarEscalaBase(data, "culto", "Culto", "18:00", porDia[data]);
+      const fids = FUNCOES_PADRAO_CULTO.filter((id) => {
+        const f = FUNCOES.find((x) => x.id === id);
+        if (!f || f.ativo === false) return false;
+        const r = f.recorrencia || "sempre";
+        if (r === "sempre") return true;
+        const [y, m] = data.split("-").map(Number);
+        const doms = domingosDoMes(y, m);
+        const idx = doms.indexOf(data) + 1;
+        if (r === "primeiro_domingo") return idx === 1;
+        if (r === "segundo_domingo") return idx === 2;
+        if (r === "terceiro_domingo") return idx === 3;
+        if (r === "quarto_domingo") return idx === 4;
+        if (r === "ultimo_domingo") return idx === doms.length;
+        return true;
+      });
+      escalas[data] = criarEscalaBase(data, "culto", "Culto", "18:00", porDia[data], fids);
     }
 
     return {
@@ -325,6 +381,7 @@ window.DiaconiaSeed = (() => {
       },
       funcoes: FUNCOES,
       funcoesPadraoCulto: FUNCOES_PADRAO_CULTO,
+      ministerios,
       equipes,
       diaconos,
       casais,
@@ -345,6 +402,7 @@ window.DiaconiaSeed = (() => {
       notificacoes: [],
       whatsappFila: [],
       whatsappLog: [],
+      comunicados: [],
       configuracoes: {
         nomeIgreja: "Diaconia Viva",
         horarioPadrao: "18:00",
@@ -375,6 +433,10 @@ window.DiaconiaSeed = (() => {
           maxEscalasPorDiaconoNoMes: 0,
           maxPessoasPorCulto: 0,
           maxPessoasPorEvento: 0,
+          permitirAcumularFuncoes: true,
+          respeitarHorarioMinisterio: true,
+          priorizarSemMinisterio: true,
+          funcoesExigemCasal: ["aconselhamento", "fechar_templo"],
         },
       },
     };

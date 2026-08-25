@@ -77,6 +77,40 @@ window.DiaconiaCalendar = (() => {
     return datas;
   }
 
+  /** 1 = 1º domingo do mês, 2 = 2º, …; 0 se a data não for domingo. */
+  function indiceDomingoNoMes(iso) {
+    const d = parseISO(iso);
+    if (d.getDay() !== 0) return 0;
+    const doms = domingosDoMes(d.getFullYear(), d.getMonth() + 1);
+    const i = doms.indexOf(iso);
+    return i >= 0 ? i + 1 : 0;
+  }
+
+  function ehUltimoDomingoDoMes(iso) {
+    const d = parseISO(iso);
+    if (d.getDay() !== 0) return false;
+    const doms = domingosDoMes(d.getFullYear(), d.getMonth() + 1);
+    return doms.length > 0 && doms[doms.length - 1] === iso;
+  }
+
+  /**
+   * Recorrência da função: sempre | primeiro_domingo | segundo_domingo |
+   * terceiro_domingo | quarto_domingo | ultimo_domingo
+   */
+  function funcaoEncaixaNaData(funcao, dataISO) {
+    if (!funcao || funcao.ativo === false) return false;
+    const r = funcao.recorrencia || "sempre";
+    if (r === "sempre") return true;
+    const idx = indiceDomingoNoMes(dataISO);
+    if (!idx) return false;
+    if (r === "primeiro_domingo") return idx === 1;
+    if (r === "segundo_domingo") return idx === 2;
+    if (r === "terceiro_domingo") return idx === 3;
+    if (r === "quarto_domingo") return idx === 4;
+    if (r === "ultimo_domingo") return ehUltimoDomingoDoMes(dataISO);
+    return true;
+  }
+
   function escalasDoMes(state, ano, mes) {
     const prefix = `${ano}-${String(mes).padStart(2, "0")}`;
     return Object.values(state.escalas)
@@ -103,6 +137,15 @@ window.DiaconiaCalendar = (() => {
     return compararHorario(chegadaMax, horarioFuncao) <= 0;
   }
 
+  /** True se o horário pontual cai dentro da janela [inicio, fim). "Final" = pós-culto, sem conflito. */
+  function horarioConflitaComJanela(horarioPonto, inicio, fim) {
+    if (!horarioPonto || !inicio || !fim) return false;
+    if (horarioPonto === "Final") return false;
+    return (
+      compararHorario(horarioPonto, inicio) >= 0 && compararHorario(horarioPonto, fim) < 0
+    );
+  }
+
   return {
     MESES,
     DIAS_SEMANA,
@@ -116,9 +159,13 @@ window.DiaconiaCalendar = (() => {
     diasNoMes,
     gradeMes,
     domingosDoMes,
+    indiceDomingoNoMes,
+    ehUltimoDomingoDoMes,
+    funcaoEncaixaNaData,
     escalasDoMes,
     hojeISO,
     compararHorario,
     horarioCompativel,
+    horarioConflitaComJanela,
   };
 })();

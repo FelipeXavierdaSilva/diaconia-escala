@@ -10,6 +10,7 @@ window.DiaconiaApp = (() => {
   const app = {
     state: null,
     page: null,
+    settingsTab: "geral",
     ano: 2026,
     mes: 8,
 
@@ -116,6 +117,7 @@ window.DiaconiaApp = (() => {
 
     renderLogin() {
       const root = document.getElementById("app");
+      root.classList.remove("has-announce");
       root.innerHTML = `
         <div class="login-screen">
           <div class="login-card">
@@ -152,16 +154,20 @@ window.DiaconiaApp = (() => {
 
     navLiderBase() {
       return [
-        { id: "escalas", label: "📅 Escalas" },
-        { id: "diaconos", label: "👥 Diáconos" },
-        { id: "equipes", label: "👨‍👩‍👧 Equipes" },
-        { id: "casais", label: "💑 Casais" },
-        { id: "funcoes", label: "📋 Funções" },
-        { id: "restricoes", label: "🔔 Avisos" },
-        { id: "trocas", label: "🔄 Troca/Cobrir" },
-        { id: "usuarios", label: "👤 Usuários" },
-        { id: "historico", label: "📊 Histórico" },
-        { id: "configuracoes", label: "⚙️ Configurações" },
+        { id: "escalas", label: "Escalas" },
+        { sep: true, label: "Pessoas" },
+        { id: "diaconos", label: "Diáconos" },
+        { id: "equipes", label: "Equipes" },
+        { id: "casais", label: "Casais" },
+        { id: "usuarios", label: "Usuários" },
+        { sep: true, label: "Operação" },
+        { id: "funcoes", label: "Funções" },
+        { id: "restricoes", label: "Avisos" },
+        { id: "trocas", label: "Troca / Cobrir" },
+        { id: "comunicados", label: "Comunicados" },
+        { sep: true, label: "Sistema" },
+        { id: "historico", label: "Histórico" },
+        { id: "configuracoes", label: "Configurações" },
       ];
     },
 
@@ -176,7 +182,8 @@ window.DiaconiaApp = (() => {
     /** Líder na escala: atalhos do próprio serviço + gestão. */
     navLiderComServico() {
       return [
-        { id: "minha", label: "🙏 Minha escala" },
+        { sep: true, label: "Meu serviço" },
+        { id: "minha", label: "Minha escala" },
         { id: "avisos", label: "Meus avisos" },
         { id: "conta", label: "Minha conta" },
         { sep: true, label: "Gestão" },
@@ -252,19 +259,46 @@ window.DiaconiaApp = (() => {
           : "Liderança"
         : "Diácono";
 
+      const anuncios = (this.state.comunicados || []).filter(
+        (c) => c.ativo !== false && String(c.texto || "").trim()
+      );
+      const textoAnuncio = anuncios.map((c) => String(c.texto).trim()).join("   ·   ");
+      const durAnuncio = Math.max(22, Math.min(72, Math.round(textoAnuncio.length * 0.12)));
+      const anuncioHtml = textoAnuncio
+        ? `<div class="announce-bar" role="region" aria-live="polite" aria-label="Comunicados da liderança">
+            <span class="announce-badge">Comunicado</span>
+            <div class="announce-viewport">
+              <div class="announce-marquee" style="--announce-dur:${durAnuncio}s">
+                <span class="announce-chunk">${UI.esc(textoAnuncio)}</span>
+                <span class="announce-chunk" aria-hidden="true">${UI.esc(textoAnuncio)}</span>
+              </div>
+            </div>
+          </div>`
+        : "";
+
       const root = document.getElementById("app");
+      root.classList.toggle("has-announce", !!textoAnuncio);
       root.innerHTML = `
+        ${anuncioHtml}
         <button class="btn btn-primary mobile-toggle" id="menu-toggle" aria-label="Menu">☰</button>
-        <div class="app-shell">
+        <div class="app-shell${textoAnuncio ? " with-announce" : ""}">
           <aside class="sidebar" id="sidebar">
             <div class="brand">
-              <div class="brand-title">Diaconia</div>
-              <div class="brand-sub">Escala Inteligente · ${UI.esc(this.state.configuracoes?.nomeIgreja || "")}</div>
+              <div class="brand-mark" aria-hidden="true"></div>
+              <div class="brand-text">
+                <div class="brand-title">Diaconia</div>
+                <div class="brand-sub">${UI.esc(this.state.configuracoes?.nomeIgreja || "Escala Inteligente")}</div>
+              </div>
             </div>
-            ${navHtml}
+            <nav class="sidebar-nav" aria-label="Menu principal">
+              ${navHtml}
+            </nav>
             <div class="sidebar-foot">
-              <div class="user-chip">${UI.esc(sessao.nome)} · ${papelLabel}</div>
-              <button class="nav-btn" id="btn-logout">Sair</button>
+              <div class="user-chip">
+                <span class="user-chip-name">${UI.esc(sessao.nome)}</span>
+                <span class="user-chip-role">${papelLabel}</span>
+              </div>
+              <button class="nav-btn nav-btn-logout" id="btn-logout">Sair</button>
             </div>
           </aside>
           <main class="main" id="main"></main>

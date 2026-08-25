@@ -149,6 +149,7 @@ window.DiaconiaViewsLider = (() => {
       nome,
       equipeId: equipePadrao(state),
       funcaoMinisterio: "",
+      ministerioId: "",
       funcaoDiaconatoId: "",
       whatsapp: waDigits(whatsapp),
       restricaoPessoal: "",
@@ -533,12 +534,24 @@ window.DiaconiaViewsLider = (() => {
           `<label><input type="radio" name="eq" value="${e.id}" ${e.id === sugerida ? "checked" : ""}/> ${UI().esc(e.nome)}</label>`
       )
       .join("");
-    const funs = state.funcoes
-      .map(
-        (f) =>
-          `<label><input type="checkbox" name="fn" value="${f.id}" ${state.funcoesPadraoCulto.includes(f.id) ? "checked" : ""}/> ${UI().esc(f.emoji + " " + f.nome)}</label>`
-      )
-      .join("");
+
+    const renderFuns = (data) => {
+      const sugeridas = new Set(
+        typeof Engine().funcoesParaData === "function"
+          ? Engine().funcoesParaData(state, data)
+          : state.funcoesPadraoCulto || []
+      );
+      return state.funcoes
+        .filter((f) => f.ativo !== false || sugeridas.has(f.id))
+        .map((f) => {
+          const hint =
+            f.recorrencia && f.recorrencia !== "sempre"
+              ? ` <span class="muted">(${UI().esc(labelRecorrencia(f.recorrencia))})</span>`
+              : "";
+          return `<label><input type="checkbox" name="fn" value="${f.id}" ${sugeridas.has(f.id) ? "checked" : ""}/> ${UI().esc(f.emoji + " " + f.nome)}${hint}</label>`;
+        })
+        .join("");
+    };
 
     UI().openModal(`
       <h2>+ Nova escala / evento</h2>
@@ -556,8 +569,9 @@ window.DiaconiaViewsLider = (() => {
       <p><strong>Equipe responsável do dia</strong></p>
       <p class="muted" style="font-size:13px;margin-top:-4px">Cada data fica com <strong>uma</strong> equipe. A sugestão alterna com o culto anterior.</p>
       <div class="radio-list">${eqs}</div>
-      <p><strong>Funções</strong></p>
-      <div class="check-list" style="max-height:160px;overflow:auto">${funs}</div>
+      <p><strong>Funções deste culto</strong></p>
+      <p class="muted" style="font-size:12px;margin-top:-4px">Sugestão conforme a data (ex.: Mesa de Ceia no 1º domingo). Ajuste se precisar.</p>
+      <div class="check-list" id="f-funs" style="max-height:160px;overflow:auto">${renderFuns(dataPadrao)}</div>
       <div class="modal-actions">
         <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
         <button class="btn btn-accent" data-act="criar">Criar escala</button>
@@ -569,6 +583,8 @@ window.DiaconiaViewsLider = (() => {
       const sug = sugerirEquipeDoDia(state, e.target.value);
       const radio = root.querySelector(`input[name="eq"][value="${sug}"]`);
       if (radio) radio.checked = true;
+      const box = root.querySelector("#f-funs");
+      if (box) box.innerHTML = renderFuns(e.target.value);
     });
 
     root.addEventListener("click", (e) => {
@@ -602,9 +618,9 @@ window.DiaconiaViewsLider = (() => {
         root.querySelector("#f-tipo").value,
         root.querySelector("#f-nome").value,
         root.querySelector("#f-hora").value,
-        [eqSel]
+        [eqSel],
+        funcoesIds
       );
-      esc.funcoesIds = funcoesIds;
       esc.descricao = root.querySelector("#f-desc").value;
       state.escalas[data] = esc;
       window.DiaconiaHistory.add(state, {
@@ -676,7 +692,7 @@ window.DiaconiaViewsLider = (() => {
       .map((d) => {
         const casal = Engine().infoCasal(state, d.id);
         const parceiro = casal ? UI().nomeDiacono(state, casal.parceiroId) : null;
-        const ministerio = (d.funcaoMinisterio || "").trim();
+        const ministerio = UI().labelMinisterioDiacono(state, d);
         const diaconato = d.funcaoDiaconatoId
           ? UI().nomeFuncao(state, d.funcaoDiaconatoId)
           : "";
@@ -777,6 +793,7 @@ window.DiaconiaViewsLider = (() => {
           ${UI().previewDadosPessoaisHtml(d, {
             titulo: "Cadastro atual",
             vazio: "Sem dados pessoais.",
+            state,
           })}
           <p class="muted" style="font-size:12px;margin:0">Alterações feitas pelo diácono em Minha conta aparecem aqui automaticamente.</p>
           <div class="modal-actions">
@@ -849,6 +866,7 @@ window.DiaconiaViewsLider = (() => {
         labelFilhos: "Tem filhos",
         labelConjuge: "Cônjuge",
         showWhatsappHint: true,
+        ministerios: state.ministerios || [],
       })}
       <hr style="border:none;border-top:1px solid var(--line);margin:16px 0"/>
       <h3 style="margin:0 0 12px;font-size:15px">Configuração da liderança</h3>
@@ -1146,11 +1164,13 @@ window.DiaconiaViewsLider = (() => {
     const { state } = ctx(app);
     const rows = (state.casais || [])
       .map((c) => {
-        const modo = c.preferirMesmaFuncao
-          ? "Mesmo dia + mesma função"
-          : c.preferirMesmoDia
-            ? "Mesmo dia (funções livres)"
-            : "Sem preferência de dia";
+        const modo = c.naoServirJuntos
+          ? "Só um na diaconia (não juntos)"
+          : c.preferirMesmaFuncao
+            ? "Mesmo dia + mesma função"
+            : c.preferirMesmoDia
+              ? "Mesmo dia (funções livres)"
+              : "Sem preferência de dia";
         return `<tr class="no-click">
           ${UI().bulkTd(c.id, "casais")}
           <td><strong>${UI().esc(Engine().nomeCasal(state, c))}</strong>
@@ -1256,8 +1276,10 @@ window.DiaconiaViewsLider = (() => {
       <h2>${casal ? "Editar" : "Novo"} casal</h2>
       <label class="field"><span>Diácono A</span><select id="c-a" class="select">${opts(casal?.diaconoIdA)}</select></label>
       <label class="field"><span>Diácono B</span><select id="c-b" class="select">${opts(casal?.diaconoIdB)}</select></label>
-      <label class="field"><span><input type="checkbox" id="c-dia" ${casal?.preferirMesmoDia !== false ? "checked" : ""}/> Preferir servir no mesmo dia/culto</span></label>
-      <label class="field"><span><input type="checkbox" id="c-func" ${casal?.preferirMesmaFuncao ? "checked" : ""}/> Preferir a mesma função (mesmo item)</span></label>
+      <label class="field"><span><input type="checkbox" id="c-nao-juntos" ${casal?.naoServirJuntos ? "checked" : ""}/> Não podem servir juntos na diaconia (apenas um por culto)</span></label>
+      <p class="muted" style="font-size:13px;margin-top:-6px">Use quando um serve em outro ministério e o outro na diaconia — o gerador coloca só um deles no mesmo culto.</p>
+      <label class="field"><span><input type="checkbox" id="c-dia" ${casal?.preferirMesmoDia !== false && !casal?.naoServirJuntos ? "checked" : ""}/> Preferir servir no mesmo dia/culto</span></label>
+      <label class="field"><span><input type="checkbox" id="c-func" ${casal?.preferirMesmaFuncao && !casal?.naoServirJuntos ? "checked" : ""}/> Preferir a mesma função (mesmo item)</span></label>
       <p class="muted" style="font-size:13px;margin-top:-6px">Deixe “mesma função” desmarcado quando cada um puder ficar em itens diferentes no mesmo culto.</p>
       <label class="field"><span>Observação</span><textarea id="c-obs" class="textarea" rows="2">${UI().esc(casal?.observacao || "")}</textarea></label>
       <label class="field"><span><input type="checkbox" id="c-ativo" ${casal?.ativo !== false ? "checked" : ""}/> Ativo</span></label>
@@ -1268,6 +1290,18 @@ window.DiaconiaViewsLider = (() => {
     `);
 
     const m = document.getElementById("modal-root");
+    const syncNaoJuntos = () => {
+      const off = m.querySelector("#c-nao-juntos").checked;
+      m.querySelector("#c-dia").disabled = off;
+      m.querySelector("#c-func").disabled = off;
+      if (off) {
+        m.querySelector("#c-dia").checked = false;
+        m.querySelector("#c-func").checked = false;
+      }
+    };
+    m.querySelector("#c-nao-juntos").addEventListener("change", syncNaoJuntos);
+    syncNaoJuntos();
+
     m.addEventListener("click", (e) => {
       const act = e.target.closest("[data-act]")?.dataset.act;
       if (act === "cancel") return UI().closeModal();
@@ -1283,11 +1317,13 @@ window.DiaconiaViewsLider = (() => {
         UI().toast("Atenção: estão em equipes diferentes — o gerador só junta casal na mesma equipe.");
       }
 
+      const naoJuntos = m.querySelector("#c-nao-juntos").checked;
       const payload = {
         diaconoIdA: a,
         diaconoIdB: b,
-        preferirMesmoDia: m.querySelector("#c-dia").checked,
-        preferirMesmaFuncao: m.querySelector("#c-func").checked,
+        naoServirJuntos: naoJuntos,
+        preferirMesmoDia: naoJuntos ? false : m.querySelector("#c-dia").checked,
+        preferirMesmaFuncao: naoJuntos ? false : m.querySelector("#c-func").checked,
         ativo: m.querySelector("#c-ativo").checked,
         observacao: m.querySelector("#c-obs").value.trim(),
       };
@@ -1308,15 +1344,29 @@ window.DiaconiaViewsLider = (() => {
   }
 
   /* ——— Funções ——— */
+  function labelRecorrencia(r) {
+    const map = {
+      sempre: "Todo culto",
+      primeiro_domingo: "1º domingo",
+      segundo_domingo: "2º domingo",
+      terceiro_domingo: "3º domingo",
+      quarto_domingo: "4º domingo",
+      ultimo_domingo: "Último domingo",
+    };
+    return map[r || "sempre"] || "Todo culto";
+  }
+
   function funcoes(app) {
     const { state } = ctx(app);
     const rows = state.funcoes
       .map(
         (f) => `<tr class="no-click">
         ${UI().bulkTd(f.id, "funcoes")}
+        <td>${f.ativo === false ? UI().badgeAtivo(false) : UI().badgeAtivo(true)}</td>
         <td>${UI().esc(f.emoji)} ${UI().esc(f.nome)}</td>
         <td>${UI().esc(f.horario)}</td>
         <td>${f.qtdPorEquipe}</td>
+        <td>${UI().esc(labelRecorrencia(f.recorrencia))}</td>
         <td class="toolbar">
           ${UI().btnIcon({ icon: "pencil", label: "Editar", variant: "ghost", attrs: { "data-act": "edit-f", "data-id": f.id } })}
           ${UI().btnIcon({ icon: "trash", label: "Excluir", variant: "danger", attrs: { "data-act": "del-f", "data-id": f.id } })}
@@ -1326,12 +1376,12 @@ window.DiaconiaViewsLider = (() => {
       .join("");
     return `
       <div class="topbar">
-        <div><h1>Funções</h1><p class="sub">Horários, quantidade e instruções. Edite ou exclua cada função.</p></div>
+        <div><h1>Funções</h1><p class="sub">Horários, quantidade, recorrência (ex.: Mesa de Ceia no 1º domingo) e instruções.</p></div>
         <button class="btn btn-accent" id="btn-add-f">+ Nova função</button>
       </div>
       <div class="panel">${UI().bulkBar("funcoes")}<div class="table-wrap"><table class="data" data-bulk-table="funcoes">
-        <thead><tr>${UI().bulkTh("funcoes")}<th>Função</th><th>Horário</th><th>Qtd/equipe</th><th>Ações</th></tr></thead>
-        <tbody>${rows || `<tr class="no-click"><td colspan="5" class="empty">Nenhuma função cadastrada.</td></tr>`}</tbody>
+        <thead><tr>${UI().bulkTh("funcoes")}<th>Status</th><th>Função</th><th>Horário</th><th>Qtd</th><th>Quando</th><th>Ações</th></tr></thead>
+        <tbody>${rows || `<tr class="no-click"><td colspan="7" class="empty">Nenhuma função cadastrada.</td></tr>`}</tbody>
       </table></div></div>`;
   }
 
@@ -1365,13 +1415,26 @@ window.DiaconiaViewsLider = (() => {
   function bindFuncoes(app, root) {
     const { state } = ctx(app);
     const openForm = (f = null) => {
+      const rec = f?.recorrencia || "sempre";
       UI().openModal(`
         <h2>${f ? "Editar" : "Nova"} função</h2>
         <label class="field"><span>Nome</span><input id="fn-nome" value="${UI().esc(f?.nome || "")}"/></label>
         <label class="field"><span>Emoji</span><input id="fn-emoji" value="${UI().esc(f?.emoji || "📋")}"/></label>
         <label class="field"><span>Horário</span><input id="fn-hora" value="${UI().esc(f?.horario || "18:00")}" placeholder="18:00 ou Final"/></label>
         <label class="field"><span>Qtd por equipe</span><input type="number" min="1" id="fn-qtd" value="${f?.qtdPorEquipe || 1}"/></label>
+        <label class="field"><span>Quando incluir no culto</span>
+          <select id="fn-rec" class="select">
+            <option value="sempre" ${rec === "sempre" ? "selected" : ""}>Todo culto</option>
+            <option value="primeiro_domingo" ${rec === "primeiro_domingo" ? "selected" : ""}>Só no 1º domingo do mês</option>
+            <option value="segundo_domingo" ${rec === "segundo_domingo" ? "selected" : ""}>Só no 2º domingo</option>
+            <option value="terceiro_domingo" ${rec === "terceiro_domingo" ? "selected" : ""}>Só no 3º domingo</option>
+            <option value="quarto_domingo" ${rec === "quarto_domingo" ? "selected" : ""}>Só no 4º domingo</option>
+            <option value="ultimo_domingo" ${rec === "ultimo_domingo" ? "selected" : ""}>Só no último domingo</option>
+          </select>
+        </label>
+        <p class="muted" style="font-size:12px;margin:-6px 0 10px">Você pode ligar ou desligar a função em um culto específico em <strong>Editar data e equipe</strong>.</p>
         <label class="field"><span>Instruções</span><textarea id="fn-inst" class="textarea" rows="4">${UI().esc(f?.instrucoes || "")}</textarea></label>
+        <label class="field"><span><input type="checkbox" id="fn-ativo" ${f?.ativo !== false ? "checked" : ""}/> Ativa (entra no padrão de cultos novos)</span></label>
         <div class="modal-actions">
           ${f ? `<button class="btn btn-danger" data-act="delete" style="margin-right:auto">Excluir</button>` : ""}
           <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
@@ -1395,11 +1458,18 @@ window.DiaconiaViewsLider = (() => {
           emoji: m.querySelector("#fn-emoji").value.trim(),
           horario: m.querySelector("#fn-hora").value.trim(),
           qtdPorEquipe: Math.max(1, +m.querySelector("#fn-qtd").value || 1),
+          recorrencia: m.querySelector("#fn-rec").value || "sempre",
           instrucoes: m.querySelector("#fn-inst").value.trim(),
+          ativo: m.querySelector("#fn-ativo").checked,
         };
         if (!payload.nome) return UI().toast("Informe o nome.");
         if (f) {
           Object.assign(f, payload);
+          if (!f.ativo) {
+            state.funcoesPadraoCulto = (state.funcoesPadraoCulto || []).filter((id) => id !== f.id);
+          } else if (!(state.funcoesPadraoCulto || []).includes(f.id)) {
+            state.funcoesPadraoCulto = [...(state.funcoesPadraoCulto || []), f.id];
+          }
           window.DiaconiaHistory.add(state, {
             tipo: "funcao",
             mensagem: `Função editada: ${f.nome}.`,
@@ -1408,6 +1478,9 @@ window.DiaconiaViewsLider = (() => {
         } else {
           const id = Engine().uid("fn");
           state.funcoes.push({ id, ...payload });
+          if (payload.ativo) {
+            state.funcoesPadraoCulto = [...(state.funcoesPadraoCulto || []), id];
+          }
           window.DiaconiaHistory.add(state, {
             tipo: "funcao",
             mensagem: `Função criada: ${payload.nome}.`,
@@ -2468,6 +2541,158 @@ window.DiaconiaViewsLider = (() => {
   }
 
   /* ——— Configurações ——— */
+  function comunicados(app) {
+    const { state } = ctx(app);
+    const lista = state.comunicados || [];
+    const qAtivos = lista.filter((c) => c.ativo !== false && String(c.texto || "").trim()).length;
+
+    return `
+      <div class="topbar">
+        <div>
+          <p class="eyebrow">Operação</p>
+          <h1>Comunicados</h1>
+          <p class="sub">Avisos importantes aparecem como tarja rolante no topo do portal para diáconos e liderança.</p>
+        </div>
+      </div>
+      <div class="grid grid-2">
+        <div class="panel">
+          <div class="settings-pane-head">
+            <h2>Novo comunicado</h2>
+            <p class="muted">Escreva e publique para exibir na tarja imediatamente.</p>
+          </div>
+          <label class="field"><span>Texto</span>
+            <textarea id="com-texto" class="textarea" rows="4" placeholder="Ex.: Reunião de alinhamento neste domingo às 17h — presença de todos."></textarea>
+          </label>
+          <label class="field"><span><input type="checkbox" id="com-ativo" checked/> Publicar agora (exibir na tarja)</span></label>
+          <button type="button" class="btn btn-accent" id="btn-add-com">Publicar comunicado</button>
+        </div>
+        <div class="panel">
+          <div class="settings-pane-head">
+            <h2>Na tarja agora</h2>
+            <p class="muted"><strong>${qAtivos}</strong> ativo(s) · ${lista.length} no total</p>
+          </div>
+          <p class="muted" style="margin:0;font-size:13px">Use o interruptor em cada item para pausar sem apagar. Vários ativos rolam juntos na mesma tarja.</p>
+        </div>
+      </div>
+      <div class="grid" id="lista-comunicados" style="margin-top:16px">
+        ${
+          lista.length
+            ? lista
+                .map((c) => {
+                  const ativo = c.ativo !== false && String(c.texto || "").trim();
+                  return `<div class="panel lider-card com-card" data-cid="${c.id}">
+            <div class="panel-head">
+              <span class="chip ${ativo ? "chip-ok" : ""}">${ativo ? "Na tarja" : "Pausado"}</span>
+              <div class="toolbar">
+                ${UI().btnIcon({ icon: "pencil", label: "Editar", variant: "ghost", attrs: { "data-act": "edit-com", "data-id": c.id } })}
+                ${UI().btnIcon({ icon: "trash", label: "Excluir", variant: "danger", attrs: { "data-act": "del-com", "data-id": c.id } })}
+              </div>
+            </div>
+            <p class="com-card-text">${UI().esc(c.texto || "")}</p>
+            <label class="field" style="margin:0"><span><input type="checkbox" data-act="toggle-com" data-id="${c.id}" ${c.ativo !== false ? "checked" : ""}/> Exibir na tarja de rolagem</span></label>
+          </div>`;
+                })
+                .join("")
+            : `<div class="panel"><p class="muted" style="margin:0">Nenhum comunicado ainda. Publique um ao lado para anunciar no portal.</p></div>`
+        }
+      </div>`;
+  }
+
+  function bindComunicados(app, root) {
+    const { state } = ctx(app);
+    if (!state.comunicados) state.comunicados = [];
+
+    root.querySelector("#btn-add-com")?.addEventListener("click", () => {
+      const texto = root.querySelector("#com-texto")?.value?.trim() || "";
+      const ativo = root.querySelector("#com-ativo")?.checked !== false;
+      if (!texto) return UI().toast("Escreva o texto do comunicado.");
+      state.comunicados.unshift({
+        id: Engine().uid("com"),
+        texto,
+        ativo,
+        criadoEm: new Date().toISOString(),
+      });
+      window.DiaconiaHistory.add(state, {
+        tipo: "config",
+        mensagem: `Comunicado publicado: ${texto.slice(0, 80)}${texto.length > 80 ? "…" : ""}`,
+        usuarioId: ctx(app).sessao()?.usuarioId,
+      });
+      app.save();
+      app.render();
+      UI().toast(ativo ? "Comunicado na tarja do portal." : "Comunicado salvo (pausado).");
+    });
+
+    root.querySelectorAll('[data-act="toggle-com"]').forEach((el) => {
+      el.addEventListener("change", () => {
+        const c = state.comunicados.find((x) => x.id === el.dataset.id);
+        if (!c) return;
+        c.ativo = el.checked;
+        app.save();
+        app.render();
+        UI().toast(c.ativo ? "Comunicado exibido na tarja." : "Comunicado pausado.");
+      });
+    });
+
+    root.querySelectorAll('[data-act="edit-com"]').forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const c = state.comunicados.find((x) => x.id === btn.dataset.id);
+        if (!c) return;
+        UI().openModal(`
+          <h2>Editar comunicado</h2>
+          <label class="field"><span>Texto</span>
+            <textarea id="com-edit-texto" class="textarea" rows="4">${UI().esc(c.texto || "")}</textarea>
+          </label>
+          <label class="field"><span><input type="checkbox" id="com-edit-ativo" ${c.ativo !== false ? "checked" : ""}/> Exibir na tarja</span></label>
+          <div class="modal-actions">
+            <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
+            <button class="btn btn-accent" data-act="save">Salvar</button>
+          </div>
+        `);
+        const modal = document.getElementById("modal-root");
+        modal.addEventListener("click", (e) => {
+          const act = e.target.closest("[data-act]")?.dataset.act;
+          if (act === "cancel") return UI().closeModal();
+          if (act !== "save") return;
+          const texto = modal.querySelector("#com-edit-texto").value.trim();
+          if (!texto) return UI().toast("Texto obrigatório.");
+          c.texto = texto;
+          c.ativo = modal.querySelector("#com-edit-ativo").checked;
+          c.atualizadoEm = new Date().toISOString();
+          window.DiaconiaHistory.add(state, {
+            tipo: "config",
+            mensagem: "Comunicado atualizado.",
+            usuarioId: ctx(app).sessao()?.usuarioId,
+          });
+          app.save();
+          UI().closeModal();
+          app.render();
+          UI().toast("Comunicado atualizado.");
+        });
+      });
+    });
+
+    root.querySelectorAll('[data-act="del-com"]').forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const c = state.comunicados.find((x) => x.id === btn.dataset.id);
+        if (!c) return;
+        const ok = await UI().confirmDelete({
+          itemLabel: "este comunicado",
+          detalhes: UI().esc((c.texto || "").slice(0, 120)),
+        });
+        if (!ok) return;
+        state.comunicados = state.comunicados.filter((x) => x.id !== c.id);
+        window.DiaconiaHistory.add(state, {
+          tipo: "config",
+          mensagem: "Comunicado excluído.",
+          usuarioId: ctx(app).sessao()?.usuarioId,
+        });
+        app.save();
+        app.render();
+        UI().toast("Comunicado excluído.");
+      });
+    });
+  }
+
   function configuracoes(app) {
     const { state } = ctx(app);
     const cfg = state.configuracoes || {};
@@ -2508,133 +2733,239 @@ window.DiaconiaViewsLider = (() => {
     };
     const filaPend = (state.whatsappFila || []).filter((x) => x.status === "pendente" || x.status === "erro").length;
 
+    if (!app.settingsTab || app.settingsTab === "comunicados") app.settingsTab = "geral";
+    const tab = app.settingsTab;
+    const tabs = [
+      { id: "geral", label: "Geral" },
+      { id: "ministerios", label: "Ministérios" },
+      { id: "regras", label: "Regras da escala" },
+      { id: "whatsapp", label: "WhatsApp" },
+      { id: "lideres", label: "Líderes" },
+      { id: "backup", label: "Backup" },
+    ];
+
     return `
-      <div class="topbar"><div><h1>Configurações</h1><p class="sub">Igreja, regras de geração, WhatsApp, líderes e backup.</p></div></div>
-      <div class="grid grid-2">
-        <div class="panel">
-          <h2>Geral</h2>
-          <label class="field"><span>Nome da igreja</span><input id="cfg-igreja" value="${UI().esc(cfg.nomeIgreja || "")}"/></label>
-          <label class="field"><span>Horário padrão</span><input id="cfg-hora" value="${UI().esc(cfg.horarioPadrao || "18:00")}"/></label>
-          <label class="field"><span><input type="checkbox" id="cfg-rest" ${cfg.exigirAprovacaoRestricao !== false ? "checked" : ""}/> Exigir aprovação de restrições</span></label>
-          <label class="field"><span><input type="checkbox" id="cfg-casais" ${cfg.respeitarCasais !== false ? "checked" : ""}/> Respeitar preferências de casais ao gerar escala</span></label>
-          <p class="muted" style="font-size:13px;margin:0 0 12px">Modelo atual: <strong>1 equipe por dia</strong> (ex.: domingo X = Equipe 01, próximo = Equipe 02).</p>
-          <button type="button" class="btn btn-accent" id="btn-save-cfg">Salvar</button>
-          <button type="button" class="btn btn-danger" id="btn-reset" style="margin-left:8px">Resetar dados demo</button>
-        </div>
+      <div class="topbar">
         <div>
-          <div class="panel-head" style="margin-bottom:12px">
-            <div>
-              <h2 style="margin:0">Líderes (WhatsApp)</h2>
-              <p class="muted" style="font-size:13px;margin:4px 0 0"><strong>${qLideres}</strong> cadastrado(s) · <strong>${qLideresAtivos}</strong> visível(is) em Minha conta · marque “Aparece na aba Diáconos” por líder</p>
+          <p class="eyebrow">Sistema</p>
+          <h1>Configurações</h1>
+          <p class="sub">Igreja, regras da escala, WhatsApp e backup — uma seção por vez.</p>
+        </div>
+      </div>
+
+      <div class="settings-layout">
+        <nav class="settings-nav" aria-label="Seções de configuração">
+          ${tabs
+            .map(
+              (t) =>
+                `<button type="button" class="settings-nav-btn ${tab === t.id ? "active" : ""}" data-settings-tab="${t.id}">${t.label}</button>`
+            )
+            .join("")}
+        </nav>
+
+        <div class="settings-body">
+          <section class="settings-pane panel" data-settings-pane="geral" ${tab === "geral" ? "" : "hidden"}>
+            <div class="settings-pane-head">
+              <h2>Geral</h2>
+              <p class="muted">Identidade da igreja e comportamento básico das restrições.</p>
             </div>
-            <button type="button" class="btn btn-accent btn-sm" id="btn-add-lider">+ Adicionar líder</button>
-          </div>
-          <div class="grid" id="lista-lideres">${lideres || `<p class="muted">Nenhum líder cadastrado.</p>`}</div>
-          <p class="muted" style="font-size:12px;margin:10px 0 0">Contas com papel Liderança em Usuários entram aqui automaticamente. Alterações refletem na hora para os diáconos.</p>
-          <button type="button" class="btn btn-primary" id="btn-save-lideres" style="margin-top:12px">Salvar líderes</button>
-        </div>
-      </div>
+            <label class="field"><span>Nome da igreja</span><input id="cfg-igreja" value="${UI().esc(cfg.nomeIgreja || "")}"/></label>
+            <label class="field"><span>Horário padrão do culto</span><input id="cfg-hora" value="${UI().esc(cfg.horarioPadrao || "18:00")}"/></label>
+            <label class="field"><span><input type="checkbox" id="cfg-rest" ${cfg.exigirAprovacaoRestricao !== false ? "checked" : ""}/> Exigir aprovação de restrições (“Não posso ir”)</span></label>
+            <p class="muted settings-hint">Modelo atual: <strong>1 equipe por dia</strong>. Rodízio, casais e ministérios ficam em <em>Regras da escala</em>.</p>
+            <div class="toolbar">
+              <button type="button" class="btn btn-accent" id="btn-save-cfg">Salvar geral</button>
+              <button type="button" class="btn btn-danger" id="btn-reset">Resetar dados demo</button>
+            </div>
+          </section>
 
-      <div class="panel" style="margin-top:16px">
-        <h2>WhatsApp (avisos e trocas)</h2>
-        <p class="muted" style="margin-top:-4px">
-          Hoje: modo <strong>manual</strong> (no PC pergunta se usa o <strong>app instalado</strong> ou o <strong>WhatsApp Web</strong>).
-          Futuro: modo <strong>API</strong> envia pelo servidor sem intervenção.
-        </p>
-        <p class="muted" style="font-size:13px">
-          Diáconos com WhatsApp: <strong>${waResumo.comWhatsapp}</strong> de ${waResumo.total}
-          ${waResumo.semWhatsapp ? ` · <span style="color:var(--warn)">${waResumo.semWhatsapp} sem número</span>` : ""}
-          ${filaPend ? ` · fila pendente: ${filaPend}` : ""}
-        </p>
-        <div class="grid grid-2" style="margin-top:12px">
-          <div>
-            <label class="field"><span><input type="checkbox" id="wa-ativo" ${wa.ativo !== false ? "checked" : ""}/> Canal WhatsApp ativo</span></label>
-            <label class="field"><span><input type="checkbox" id="wa-troca" ${wa.notificarPedidoTroca !== false ? "checked" : ""}/> Avisar quem recebe pedido de troca/cobertura</span></label>
-            <label class="field"><span><input type="checkbox" id="wa-troca-resp" ${wa.notificarRespostaTroca !== false ? "checked" : ""}/> Avisar quem pediu quando aceitarem ou recusarem</span></label>
-            <label class="field"><span><input type="checkbox" id="wa-cadastro" ${wa.notificarCadastroUsuario !== false ? "checked" : ""}/> Enviar login e senha ao criar usuário</span></label>
-            <label class="field"><span><input type="checkbox" id="wa-rest" ${wa.notificarRestricao !== false ? "checked" : ""}/> Avisar líderes quando diácono enviar “Não posso ir”</span></label>
-            <label class="field"><span><input type="checkbox" id="wa-rest-st" ${wa.notificarStatusRestricao !== false ? "checked" : ""}/> Avisar diácono quando líder aprovar ou recusar aviso</span></label>
-            <label class="field"><span><input type="checkbox" id="wa-direto" ${wa.abrirDireto ? "checked" : ""}/> No celular, abrir conversa direto no app</span></label>
-            <p class="muted" style="font-size:12px;margin:-8px 0 12px">No computador o sistema sempre pergunta: app instalado (desta máquina) ou WhatsApp Web.</p>
-            <label class="field"><span>Modo de envio</span>
-              <select id="wa-modo" class="select">
-                <option value="manual" ${wa.modo !== "api" ? "selected" : ""}>Manual (wa.me) — atual</option>
-                <option value="api" ${wa.modo === "api" ? "selected" : ""}>API (servidor) — futuro</option>
-              </select>
-            </label>
-          </div>
-          <div>
-            <label class="field"><span>URL pública do portal (opcional)</span>
-              <input id="wa-portal" class="input" value="${UI().esc(wa.portalBaseUrl || "")}" placeholder="Ex.: https://suaigreja.com/diaconia/"/>
-            </label>
-            <p class="muted" style="font-size:12px;margin:-8px 0 12px">Usada no link enviado. Vazia = URL atual do navegador.</p>
-            <label class="field"><span>API URL (futuro)</span>
-              <input id="wa-api-url" class="input" value="${UI().esc(wa.apiUrl || "")}" placeholder="https://seu-servidor/api/whatsapp/send"/>
-            </label>
-            <label class="field"><span>API Token (futuro)</span>
-              <input id="wa-api-token" class="input" type="password" value="${UI().esc(wa.apiToken || "")}" placeholder="Será melhor guardar no servidor"/>
-            </label>
-          </div>
-        </div>
-        <div class="toolbar" style="margin-top:8px">
-          <button type="button" class="btn btn-accent" id="btn-save-wa">Salvar WhatsApp</button>
-          <button type="button" class="btn btn-ghost" id="btn-wa-fila">Processar fila API</button>
-        </div>
-      </div>
+          <section class="settings-pane panel" data-settings-pane="ministerios" ${tab === "ministerios" ? "" : "hidden"}>
+            <div class="settings-pane-head settings-pane-head-row">
+              <div>
+                <h2>Ministérios da igreja</h2>
+                <p class="muted">Horários evitam conflito com a diaconia (ex.: Infantil 18:00–21:00 — ainda dá para servir café antes ou fechar o templo depois).</p>
+              </div>
+              <button type="button" class="btn btn-accent btn-sm" id="btn-add-ministerio">+ Ministério</button>
+            </div>
+            <div class="table-wrap">
+              <table class="data" id="tbl-ministerios">
+                <thead><tr><th>Status</th><th>Nome</th><th>Início</th><th>Fim</th><th>Ações</th></tr></thead>
+                <tbody>
+                  ${(state.ministerios || [])
+                    .map(
+                      (m) => `<tr class="no-click" data-mid="${m.id}">
+                    <td>${m.ativo !== false ? UI().badgeAtivo(true) : UI().badgeAtivo(false)}</td>
+                    <td>${UI().esc(m.nome)}</td>
+                    <td>${UI().esc(m.horarioInicio || "—")}</td>
+                    <td>${UI().esc(m.horarioFim || "—")}</td>
+                    <td class="toolbar">
+                      ${UI().btnIcon({ icon: "pencil", label: "Editar", variant: "ghost", attrs: { "data-act": "edit-min", "data-id": m.id } })}
+                      ${UI().btnIcon({ icon: "trash", label: "Excluir", variant: "danger", attrs: { "data-act": "del-min", "data-id": m.id } })}
+                    </td>
+                  </tr>`
+                    )
+                    .join("") || `<tr class="no-click"><td colspan="5" class="empty">Nenhum ministério cadastrado. Adicione Infantil, Louvor, etc.</td></tr>`}
+                </tbody>
+              </table>
+            </div>
+          </section>
 
-      <div class="panel" style="margin-top:16px">
-        <h2>Regras de geração da escala</h2>
-        <p class="muted" style="margin-top:-4px">Essas opções valem sempre que você gerar a escala (por mês ou por período) ou um dia.</p>
-        <div class="grid grid-2" style="margin-top:12px">
-          <div>
-            <label class="field"><span><input type="checkbox" id="cfg-var-fn" ${ger.variarFuncoesNoMes !== false ? "checked" : ""}/> Variar funções no mês</span></label>
-            <p class="muted" style="font-size:12px;margin:-8px 0 12px">Evita que a mesma pessoa fique sempre na mesma função ao longo do mês.</p>
-            <label class="field"><span><input type="checkbox" id="cfg-evita-seq" ${ger.evitarMesmaFuncaoConsecutiva !== false ? "checked" : ""}/> Evitar repetir a mesma função em seguida</span></label>
-            <p class="muted" style="font-size:12px;margin:-8px 0 12px">Quem fez Louça no último culto tende a não fazer Louça de novo no próximo.</p>
-            <label class="field"><span><input type="checkbox" id="cfg-emb-fn" ${ger.embaralharOrdemFuncoes !== false ? "checked" : ""}/> Embaralhar ordem das funções a cada geração</span></label>
-            <p class="muted" style="font-size:12px;margin:-8px 0 12px">Cada geração começa preenchendo as funções em ordem diferente.</p>
-            <label class="field"><span><input type="checkbox" id="cfg-eq-part" ${ger.equilibrarParticipacao !== false ? "checked" : ""}/> Equilibrar participação geral</span></label>
-            <p class="muted" style="font-size:12px;margin:-8px 0 12px">Prioriza quem serviu menos vezes no histórico.</p>
-          </div>
-          <div>
-            <label class="field"><span>Máx. escalas por diácono no mês</span>
-              <input type="number" id="cfg-max-mes" class="input" min="0" step="1" value="${UI().esc(String(ger.maxEscalasPorDiaconoNoMes ?? 0))}"/>
-            </label>
-            <p class="muted" style="font-size:12px;margin:-8px 0 12px">0 = sem limite. Ex.: 2 = no máximo duas escalas no mês por pessoa.</p>
-            <label class="field"><span>Máx. pessoas por culto</span>
-              <input type="number" id="cfg-max-culto" class="input" min="0" step="1" value="${UI().esc(String(ger.maxPessoasPorCulto ?? 0))}"/>
-            </label>
-            <p class="muted" style="font-size:12px;margin:-8px 0 12px">0 = preenche todas as vagas das funções. Útil para limitar o tamanho da escala do culto.</p>
-            <label class="field"><span>Máx. pessoas por evento</span>
-              <input type="number" id="cfg-max-evento" class="input" min="0" step="1" value="${UI().esc(String(ger.maxPessoasPorEvento ?? 0))}"/>
-            </label>
-            <p class="muted" style="font-size:12px;margin:-8px 0 12px">Mesma ideia, para escalas do tipo Evento.</p>
-          </div>
-        </div>
-        <button type="button" class="btn btn-accent" id="btn-save-geracao">Salvar regras de geração</button>
-      </div>
+          <section class="settings-pane panel" data-settings-pane="regras" ${tab === "regras" ? "" : "hidden"}>
+            <div class="settings-pane-head">
+              <h2>Regras da escala</h2>
+              <p class="muted">Tudo o que o gerador leva em conta. Salve ao final desta seção.</p>
+            </div>
 
-      <div class="panel" style="margin-top:16px">
-        <div class="panel-head">
-          <div>
-            <h2>Backup e restauração</h2>
-            <p class="muted" style="margin:0">Salve um arquivo JSON com escalas, diáconos, restrições, trocas e configurações.</p>
-          </div>
-        </div>
-        <div class="chips" style="margin:12px 0 16px">
-          <span class="chip">${qEscalas} escalas</span>
-          <span class="chip">${qDiaconos} diáconos</span>
-          <span class="chip">${(state.restricoes || []).length} restrições</span>
-          <span class="chip">${(state.trocas || []).length} trocas</span>
-        </div>
-        <div class="toolbar">
-          <button type="button" class="btn btn-primary" id="btn-backup-export">Baixar backup</button>
-          <button type="button" class="btn btn-accent" id="btn-backup-import">Restaurar backup</button>
-          <input type="file" id="backup-file" accept=".json,application/json" class="hidden"/>
-        </div>
-        <div class="alert alert-info" style="margin-top:14px">
-          <strong>Dica:</strong> faça backup antes de gerar o ano ou após aprovar restrições/trocas.
-          A restauração <strong>substitui todos os dados atuais</strong> pelos do arquivo.
+            <div class="settings-block">
+              <h3>Participação e rodízio</h3>
+              <div class="grid grid-2">
+                <div>
+                  <label class="field"><span><input type="checkbox" id="cfg-var-fn" ${ger.variarFuncoesNoMes !== false ? "checked" : ""}/> Variar funções no mês</span></label>
+                  <p class="muted settings-hint">Evita a mesma pessoa sempre na mesma função.</p>
+                  <label class="field"><span><input type="checkbox" id="cfg-evita-seq" ${ger.evitarMesmaFuncaoConsecutiva !== false ? "checked" : ""}/> Evitar repetir a mesma função em seguida</span></label>
+                  <p class="muted settings-hint">Quem fez Louça no último culto tende a não repetir no próximo.</p>
+                  <label class="field"><span><input type="checkbox" id="cfg-emb-fn" ${ger.embaralharOrdemFuncoes !== false ? "checked" : ""}/> Embaralhar ordem das funções a cada geração</span></label>
+                  <p class="muted settings-hint">Cada geração preenche as funções em ordem diferente.</p>
+                  <label class="field"><span><input type="checkbox" id="cfg-eq-part" ${ger.equilibrarParticipacao !== false ? "checked" : ""}/> Equilibrar participação geral</span></label>
+                  <p class="muted settings-hint">Prioriza quem serviu menos vezes.</p>
+                </div>
+                <div>
+                  <label class="field"><span>Máx. escalas por diácono no mês</span>
+                    <input type="number" id="cfg-max-mes" class="input" min="0" step="1" value="${UI().esc(String(ger.maxEscalasPorDiaconoNoMes ?? 0))}"/>
+                  </label>
+                  <p class="muted settings-hint">0 = sem limite.</p>
+                  <label class="field"><span>Máx. pessoas por culto</span>
+                    <input type="number" id="cfg-max-culto" class="input" min="0" step="1" value="${UI().esc(String(ger.maxPessoasPorCulto ?? 0))}"/>
+                  </label>
+                  <p class="muted settings-hint">0 = preenche todas as vagas.</p>
+                  <label class="field"><span>Máx. pessoas por evento</span>
+                    <input type="number" id="cfg-max-evento" class="input" min="0" step="1" value="${UI().esc(String(ger.maxPessoasPorEvento ?? 0))}"/>
+                  </label>
+                  <p class="muted settings-hint">Mesma ideia para Evento.</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-block">
+              <h3>Várias funções no mesmo culto</h3>
+              <label class="field"><span><input type="checkbox" id="cfg-acumular" ${ger.permitirAcumularFuncoes !== false ? "checked" : ""}/> Permitir que um diácono faça mais de uma atividade no mesmo culto</span></label>
+              <p class="muted settings-hint">Primeiro o gerador tenta 1 função por pessoa; se faltarem vagas, a mesma pessoa pode acumular (útil com equipes menores).</p>
+            </div>
+
+            <div class="settings-block">
+              <h3>Casais</h3>
+              <label class="field"><span><input type="checkbox" id="cfg-casais" ${cfg.respeitarCasais !== false ? "checked" : ""}/> Respeitar preferências de casais ao gerar</span></label>
+              <p class="muted settings-hint">Inclui “mesmo dia”, “mesma função” e “não servir juntos” (aba <strong>Casais</strong>).</p>
+              <p class="settings-label">Funções que só podem ser um casal cadastrado (mín. 2, cônjuges reais):</p>
+              <div class="check-list" id="cfg-funcoes-casal">
+                ${(state.funcoes || [])
+                  .map((f) => {
+                    const checked = (ger.funcoesExigemCasal || ["aconselhamento", "fechar_templo"]).includes(f.id);
+                    return `<label><input type="checkbox" name="cfg-exige-casal" value="${f.id}" ${checked ? "checked" : ""}/> ${UI().esc(f.emoji + " " + f.nome)}</label>`;
+                  })
+                  .join("")}
+              </div>
+            </div>
+
+            <div class="settings-block">
+              <h3>Ministérios (outro serviço no culto)</h3>
+              <label class="field"><span><input type="checkbox" id="cfg-min-horario" ${ger.respeitarHorarioMinisterio !== false ? "checked" : ""}/> Respeitar horário do ministério ao escalar na diaconia</span></label>
+              <p class="muted settings-hint">Quem está no Infantil 18:00–21:00 não entra em funções da diaconia nesse intervalo.</p>
+              <label class="field"><span><input type="checkbox" id="cfg-min-prio" ${ger.priorizarSemMinisterio !== false ? "checked" : ""}/> Preferir quem não tem outro ministério (quando empatar)</span></label>
+              <p class="muted settings-hint">Cadastre ministérios na seção <strong>Ministérios</strong> e vincule em Diáconos.</p>
+            </div>
+
+            <div class="settings-block settings-block-soft">
+              <h3>Funções por culto</h3>
+              <p class="muted" style="margin:0">
+                Em <strong>Funções</strong>: ative/inative e defina recorrência (ex.: Mesa de Ceia no 1º domingo).
+                Em cada culto: <strong>Editar data e equipe</strong> liga/desliga funções daquele dia.
+              </p>
+            </div>
+
+            <button type="button" class="btn btn-accent" id="btn-save-geracao">Salvar regras da escala</button>
+          </section>
+
+          <section class="settings-pane panel" data-settings-pane="whatsapp" ${tab === "whatsapp" ? "" : "hidden"}>
+            <div class="settings-pane-head">
+              <h2>WhatsApp</h2>
+              <p class="muted">Avisos de troca, restrições e cadastro. Hoje: modo <strong>manual</strong>; futuro: <strong>API</strong>.</p>
+            </div>
+            <p class="muted settings-stat">
+              Diáconos com WhatsApp: <strong>${waResumo.comWhatsapp}</strong> de ${waResumo.total}
+              ${waResumo.semWhatsapp ? ` · <span class="text-warn">${waResumo.semWhatsapp} sem número</span>` : ""}
+              ${filaPend ? ` · fila pendente: ${filaPend}` : ""}
+            </p>
+            <div class="grid grid-2">
+              <div>
+                <label class="field"><span><input type="checkbox" id="wa-ativo" ${wa.ativo !== false ? "checked" : ""}/> Canal WhatsApp ativo</span></label>
+                <label class="field"><span><input type="checkbox" id="wa-troca" ${wa.notificarPedidoTroca !== false ? "checked" : ""}/> Avisar quem recebe pedido de troca/cobertura</span></label>
+                <label class="field"><span><input type="checkbox" id="wa-troca-resp" ${wa.notificarRespostaTroca !== false ? "checked" : ""}/> Avisar quem pediu quando aceitarem ou recusarem</span></label>
+                <label class="field"><span><input type="checkbox" id="wa-cadastro" ${wa.notificarCadastroUsuario !== false ? "checked" : ""}/> Enviar login e senha ao criar usuário</span></label>
+                <label class="field"><span><input type="checkbox" id="wa-rest" ${wa.notificarRestricao !== false ? "checked" : ""}/> Avisar líderes quando diácono enviar “Não posso ir”</span></label>
+                <label class="field"><span><input type="checkbox" id="wa-rest-st" ${wa.notificarStatusRestricao !== false ? "checked" : ""}/> Avisar diácono quando líder aprovar ou recusar aviso</span></label>
+                <label class="field"><span><input type="checkbox" id="wa-direto" ${wa.abrirDireto ? "checked" : ""}/> No celular, abrir conversa direto no app</span></label>
+                <p class="muted settings-hint">No computador o sistema pergunta: app instalado ou WhatsApp Web.</p>
+                <label class="field"><span>Modo de envio</span>
+                  <select id="wa-modo" class="select">
+                    <option value="manual" ${wa.modo !== "api" ? "selected" : ""}>Manual (wa.me) — atual</option>
+                    <option value="api" ${wa.modo === "api" ? "selected" : ""}>API (servidor) — futuro</option>
+                  </select>
+                </label>
+              </div>
+              <div>
+                <label class="field"><span>URL pública do portal (opcional)</span>
+                  <input id="wa-portal" class="input" value="${UI().esc(wa.portalBaseUrl || "")}" placeholder="Ex.: https://suaigreja.com/diaconia/"/>
+                </label>
+                <p class="muted settings-hint">Usada no link enviado. Vazia = URL atual do navegador.</p>
+                <label class="field"><span>API URL (futuro)</span>
+                  <input id="wa-api-url" class="input" value="${UI().esc(wa.apiUrl || "")}" placeholder="https://seu-servidor/api/whatsapp/send"/>
+                </label>
+                <label class="field"><span>API Token (futuro)</span>
+                  <input id="wa-api-token" class="input" type="password" value="${UI().esc(wa.apiToken || "")}" placeholder="Será melhor guardar no servidor"/>
+                </label>
+              </div>
+            </div>
+            <div class="toolbar">
+              <button type="button" class="btn btn-accent" id="btn-save-wa">Salvar WhatsApp</button>
+              <button type="button" class="btn btn-ghost" id="btn-wa-fila">Processar fila API</button>
+            </div>
+          </section>
+
+          <section class="settings-pane panel" data-settings-pane="lideres" ${tab === "lideres" ? "" : "hidden"}>
+            <div class="settings-pane-head settings-pane-head-row">
+              <div>
+                <h2>Líderes</h2>
+                <p class="muted"><strong>${qLideres}</strong> cadastrado(s) · <strong>${qLideresAtivos}</strong> visível(is) em Minha conta</p>
+              </div>
+              <button type="button" class="btn btn-accent btn-sm" id="btn-add-lider">+ Adicionar líder</button>
+            </div>
+            <div class="grid settings-lideres" id="lista-lideres">${lideres || `<p class="muted">Nenhum líder cadastrado.</p>`}</div>
+            <p class="muted settings-hint">Contas com papel Liderança em Usuários entram aqui automaticamente.</p>
+            <button type="button" class="btn btn-primary" id="btn-save-lideres">Salvar líderes</button>
+          </section>
+
+          <section class="settings-pane panel" data-settings-pane="backup" ${tab === "backup" ? "" : "hidden"}>
+            <div class="settings-pane-head">
+              <h2>Backup e restauração</h2>
+              <p class="muted">Arquivo JSON com escalas, diáconos, restrições, trocas e configurações.</p>
+            </div>
+            <div class="chips">
+              <span class="chip">${qEscalas} escalas</span>
+              <span class="chip">${qDiaconos} diáconos</span>
+              <span class="chip">${(state.restricoes || []).length} restrições</span>
+              <span class="chip">${(state.trocas || []).length} trocas</span>
+            </div>
+            <div class="toolbar">
+              <button type="button" class="btn btn-primary" id="btn-backup-export">Baixar backup</button>
+              <button type="button" class="btn btn-accent" id="btn-backup-import">Restaurar backup</button>
+              <input type="file" id="backup-file" accept=".json,application/json" class="hidden"/>
+            </div>
+            <div class="alert alert-info">
+              <strong>Dica:</strong> faça backup antes de gerar o ano ou após aprovar restrições/trocas.
+              A restauração <strong>substitui todos os dados atuais</strong> pelos do arquivo.
+            </div>
+          </section>
         </div>
       </div>`;
   }
@@ -2643,6 +2974,21 @@ window.DiaconiaViewsLider = (() => {
     const { state } = ctx(app);
     if (!state.lideres) state.lideres = [];
     if (!state.configuracoes.geracao) state.configuracoes.geracao = {};
+    if (!app.settingsTab) app.settingsTab = "geral";
+
+    function showSettingsTab(id) {
+      app.settingsTab = id;
+      root.querySelectorAll("[data-settings-tab]").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.settingsTab === id);
+      });
+      root.querySelectorAll("[data-settings-pane]").forEach((pane) => {
+        pane.hidden = pane.dataset.settingsPane !== id;
+      });
+    }
+
+    root.querySelectorAll("[data-settings-tab]").forEach((btn) => {
+      btn.addEventListener("click", () => showSettingsTab(btn.dataset.settingsTab));
+    });
 
     function salvarGeracao() {
       const g = state.configuracoes.geracao;
@@ -2653,6 +2999,15 @@ window.DiaconiaViewsLider = (() => {
       g.maxEscalasPorDiaconoNoMes = Math.max(0, +root.querySelector("#cfg-max-mes").value || 0);
       g.maxPessoasPorCulto = Math.max(0, +root.querySelector("#cfg-max-culto").value || 0);
       g.maxPessoasPorEvento = Math.max(0, +root.querySelector("#cfg-max-evento").value || 0);
+      g.permitirAcumularFuncoes = root.querySelector("#cfg-acumular")?.checked !== false;
+      g.respeitarHorarioMinisterio = root.querySelector("#cfg-min-horario")?.checked !== false;
+      g.priorizarSemMinisterio = root.querySelector("#cfg-min-prio")?.checked !== false;
+      g.funcoesExigemCasal = [
+        ...root.querySelectorAll('input[name="cfg-exige-casal"]:checked'),
+      ].map((i) => i.value);
+      if (root.querySelector("#cfg-casais")) {
+        state.configuracoes.respeitarCasais = root.querySelector("#cfg-casais").checked;
+      }
     }
 
     root.querySelector("#btn-save-cfg")?.addEventListener("click", () => {
@@ -2660,21 +3015,99 @@ window.DiaconiaViewsLider = (() => {
       state.configuracoes.horarioPadrao = root.querySelector("#cfg-hora").value;
       state.configuracoes.exigirAprovacaoRestricao = root.querySelector("#cfg-rest").checked;
       state.configuracoes.exigirAprovacaoTroca = false;
-      state.configuracoes.respeitarCasais = root.querySelector("#cfg-casais").checked;
-      salvarGeracao();
       app.save();
-      UI().toast("Configurações salvas.");
+      UI().toast("Configurações gerais salvas.");
+    });
+
+    const formMinisterio = (m = null) => {
+      UI().openModal(`
+        <h2>${m ? "Editar" : "Novo"} ministério</h2>
+        <label class="field"><span>Nome</span><input id="min-nome" value="${UI().esc(m?.nome || "")}" placeholder="Ex.: Infantil"/></label>
+        <div class="grid grid-2">
+          <label class="field"><span>Início</span><input id="min-ini" value="${UI().esc(m?.horarioInicio || "18:00")}" placeholder="18:00"/></label>
+          <label class="field"><span>Fim</span><input id="min-fim" value="${UI().esc(m?.horarioFim || "21:00")}" placeholder="21:00"/></label>
+        </div>
+        <label class="field"><span><input type="checkbox" id="min-ativo" ${m?.ativo !== false ? "checked" : ""}/> Ativo</span></label>
+        <p class="muted" style="font-size:12px">Diáconos vinculados a este ministério não serão escalados em funções da diaconia cujo horário caia dentro deste intervalo.</p>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
+          <button class="btn btn-accent" data-act="save">Salvar</button>
+        </div>
+      `);
+      const modal = document.getElementById("modal-root");
+      modal.addEventListener("click", (e) => {
+        const act = e.target.closest("[data-act]")?.dataset.act;
+        if (act === "cancel") return UI().closeModal();
+        if (act !== "save") return;
+        const nome = modal.querySelector("#min-nome").value.trim();
+        const horarioInicio = modal.querySelector("#min-ini").value.trim() || "18:00";
+        const horarioFim = modal.querySelector("#min-fim").value.trim() || "21:00";
+        const ativo = modal.querySelector("#min-ativo").checked;
+        if (!nome) return UI().toast("Informe o nome.");
+        if (!state.ministerios) state.ministerios = [];
+        if (m) {
+          Object.assign(m, { nome, horarioInicio, horarioFim, ativo });
+        } else {
+          state.ministerios.push({
+            id: Engine().uid("min"),
+            nome,
+            horarioInicio,
+            horarioFim,
+            ativo,
+          });
+        }
+        window.DiaconiaHistory.add(state, {
+          tipo: "config",
+          mensagem: `Ministério ${m ? "atualizado" : "criado"}: ${nome} (${horarioInicio}–${horarioFim}).`,
+          usuarioId: ctx(app).sessao()?.usuarioId,
+        });
+        app.save();
+        UI().closeModal();
+        app.render();
+        UI().toast("Ministério salvo.");
+      });
+    };
+
+    root.querySelector("#btn-add-ministerio")?.addEventListener("click", () => formMinisterio());
+    root.querySelectorAll('[data-act="edit-min"]').forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const m = (state.ministerios || []).find((x) => x.id === btn.dataset.id);
+        if (m) formMinisterio(m);
+      });
+    });
+    root.querySelectorAll('[data-act="del-min"]').forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const m = (state.ministerios || []).find((x) => x.id === btn.dataset.id);
+        if (!m) return;
+        const ok = await UI().confirmDelete({
+          itemLabel: `o ministério <strong>${UI().esc(m.nome)}</strong>`,
+          detalhes: "Diáconos vinculados ficarão sem ministério (podem editar depois).",
+        });
+        if (!ok) return;
+        state.ministerios = (state.ministerios || []).filter((x) => x.id !== m.id);
+        for (const d of state.diaconos || []) {
+          if (d.ministerioId === m.id) d.ministerioId = "";
+        }
+        window.DiaconiaHistory.add(state, {
+          tipo: "config",
+          mensagem: `Ministério excluído: ${m.nome}.`,
+          usuarioId: ctx(app).sessao()?.usuarioId,
+        });
+        app.save();
+        app.render();
+        UI().toast("Ministério excluído.");
+      });
     });
 
     root.querySelector("#btn-save-geracao")?.addEventListener("click", () => {
       salvarGeracao();
       window.DiaconiaHistory.add(state, {
         tipo: "config",
-        mensagem: "Regras de geração da escala atualizadas.",
+        mensagem: "Regras da escala atualizadas.",
         usuarioId: ctx(app).sessao()?.usuarioId,
       });
       app.save();
-      UI().toast("Regras de geração salvas.");
+      UI().toast("Regras da escala salvas.");
     });
 
     root.querySelector("#btn-save-wa")?.addEventListener("click", () => {
@@ -2897,6 +3330,7 @@ window.DiaconiaViewsLider = (() => {
     funcoes: { render: funcoes, bind: bindFuncoes },
     restricoes: { render: restricoes, bind: bindRestricoes },
     trocas: { render: trocas, bind: bindTrocas },
+    comunicados: { render: comunicados, bind: bindComunicados },
     usuarios: { render: usuarios, bind: bindUsuarios },
     historico: { render: historico, bind: bindHistorico },
     configuracoes: { render: configuracoes, bind: bindConfiguracoes },

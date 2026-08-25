@@ -986,11 +986,13 @@ window.DiaconiaViewsDiacono = (() => {
     const casal = Engine().infoCasal(state, s.diaconoId);
     const parceiro = casal ? UI().nomeDiacono(state, casal.parceiroId) : null;
     const pref = casal?.casal
-      ? casal.casal.preferirMesmaFuncao
-        ? "Mesmo culto e, quando possível, mesma função"
-        : casal.casal.preferirMesmoDia
-          ? "Preferência: mesmo culto (funções podem ser diferentes)"
-          : "Sem preferência de mesmo dia"
+      ? casal.casal.naoServirJuntos
+        ? "Não servem juntos na diaconia (apenas um por culto)"
+        : casal.casal.preferirMesmaFuncao
+          ? "Mesmo culto e, quando possível, mesma função"
+          : casal.casal.preferirMesmoDia
+            ? "Preferência: mesmo culto (funções podem ser diferentes)"
+            : "Sem preferência de mesmo dia"
       : null;
 
     const lideresLista = (state.lideres || []).filter((l) => l.ativo !== false);
@@ -1021,13 +1023,14 @@ window.DiaconiaViewsDiacono = (() => {
       </div>
       <div class="grid grid-2">
         <div class="panel">
-          ${UI().previewDadosPessoaisHtml(d)}
+          ${UI().previewDadosPessoaisHtml(d, { state })}
           <hr style="border:none;border-top:1px solid var(--line);margin:16px 0"/>
           <h2 style="margin-top:0">Atualizar dados</h2>
           ${UI().dadosPessoaisFormHtml("p", d, {
             labelCasado: "Sou casado(a)",
             labelFilhos: "Tenho filhos",
             labelConjuge: "Casado(a) com",
+            ministerios: state.ministerios || [],
           })}
           <p class="muted" style="font-size:12px;margin:-6px 0 12px">A preferência de escala em casal continua sendo definida pela liderança.</p>
           <p class="muted" style="font-size:12px;margin:-6px 0 12px">Para um dia específico em que não pode ir, use Avisos → Não posso ir.</p>
