@@ -426,6 +426,21 @@ window.DiaconiaViewsLider = (() => {
   function abrirModalGerarEscala(app) {
     const { state, ano, mes } = ctx(app);
     const pendentes = (state.restricoes || []).filter((r) => r.status === "pendente").length;
+    const eqsAtivas = (state.equipes || []).filter((e) => e.ativa !== false);
+    const sugerida =
+      (typeof Engine().sugerirEquipeInicioMes === "function"
+        ? Engine().sugerirEquipeInicioMes(state, ano, mes)
+        : null) || eqsAtivas[0]?.id || "";
+    const optsEq = eqsAtivas
+      .map(
+        (e) =>
+          `<option value="${e.id}" ${e.id === sugerida ? "selected" : ""}>${UI().esc(e.nome)}</option>`
+      )
+      .join("");
+    const primeiroDom = (Cal().domingosDoMes(ano, mes) || [])[0];
+    const labelPrimeiro = primeiroDom
+      ? primeiroDom.split("-").reverse().join("/")
+      : `1º domingo de ${Cal().nomeMes(mes)}`;
 
     UI().openModal(`
       <h2>Gerar escala</h2>
@@ -434,14 +449,20 @@ window.DiaconiaViewsLider = (() => {
         <input id="g-qtd-meses" class="input" type="number" min="1" max="12" value="1" inputmode="numeric"/>
       </label>
       <p class="muted" style="font-size:12px;margin:-6px 0 12px" id="g-periodo-preview">Período: ${UI().esc(periodoGeracaoLabel(ano, mes, 1))}</p>
+      <label class="field"><span>Equipe do 1º domingo (${UI().esc(labelPrimeiro)})</span>
+        <select id="g-eq-inicio" class="select" ${eqsAtivas.length ? "" : "disabled"}>
+          ${optsEq || `<option value="">Nenhuma equipe ativa</option>`}
+        </select>
+      </label>
+      <p class="muted" style="font-size:12px;margin:-6px 0 12px">Os domingos seguintes alternam automaticamente. Nos meses seguintes o rodízio continua a partir desta sequência.</p>
       ${
         pendentes
           ? `<div class="alert alert-warn">Há ${pendentes} restrição(ões) pendente(s). Apenas as <strong>aprovadas</strong> entram na geração.</div>`
-          : `<div class="alert alert-info">Domingos sem escala serão criados automaticamente. Escalas já existentes no período serão redistribuídas.</div>`
+          : `<div class="alert alert-info">Domingos sem escala serão criados. As equipes dos domingos do período serão definidas pelo rodízio escolhido e as pessoas redistribuídas.</div>`
       }
       <div class="modal-actions">
         <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
-        <button class="btn btn-accent" data-act="gerar">Gerar escala</button>
+        <button class="btn btn-accent" data-act="gerar" ${eqsAtivas.length ? "" : "disabled"}>Gerar escala</button>
       </div>
     `);
 
@@ -459,10 +480,15 @@ window.DiaconiaViewsLider = (() => {
       if (act !== "gerar") return;
 
       const qtdMeses = Math.min(12, Math.max(1, parseInt(input?.value, 10) || 1));
-      const res = Engine().gerarPeriodo(state, ano, mes, qtdMeses);
+      const equipeInicioId = root.querySelector("#g-eq-inicio")?.value || sugerida;
+      if (!equipeInicioId) return UI().toast("Cadastre e ative pelo menos uma equipe.");
+
+      const res = Engine().gerarPeriodo(state, ano, mes, qtdMeses, { equipeInicioId });
+      const nomeEq =
+        eqsAtivas.find((x) => x.id === (res.equipeInicioId || equipeInicioId))?.nome || equipeInicioId;
       window.DiaconiaHistory.add(state, {
         tipo: "gerar",
-        mensagem: `Escala gerada: ${qtdMeses} mês(es) a partir de ${Cal().nomeMes(mes)}/${ano}${res.criadas ? ` (${res.criadas} culto(s) criado(s))` : ""}.`,
+        mensagem: `Escala gerada: ${qtdMeses} mês(es) a partir de ${Cal().nomeMes(mes)}/${ano}, começando com ${nomeEq}${res.criadas ? ` (${res.criadas} culto(s) criado(s))` : ""}.`,
         usuarioId: ctx(app).sessao()?.usuarioId,
       });
       app.save();
@@ -470,8 +496,8 @@ window.DiaconiaViewsLider = (() => {
       app.render();
       UI().toast(
         res.criadas
-          ? `Escala gerada (${qtdMeses} mês${qtdMeses > 1 ? "es" : ""}, ${res.criadas} culto(s) novo(s)).`
-          : `Escala gerada para ${qtdMeses} mês${qtdMeses > 1 ? "es" : ""}.`
+          ? `Escala gerada (${qtdMeses} mês${qtdMeses > 1 ? "es" : ""}, ${res.criadas} culto(s) novo(s)) — início: ${nomeEq}.`
+          : `Escala gerada para ${qtdMeses} mês${qtdMeses > 1 ? "es" : ""} — 1º domingo: ${nomeEq}.`
       );
     });
   }

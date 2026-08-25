@@ -121,7 +121,10 @@ window.DiaconiaApp = (() => {
       root.innerHTML = `
         <div class="login-screen">
           <div class="login-card">
-            <div class="eyebrow">Diaconia Viva</div>
+            <div class="login-brand">
+              <img class="login-logo" src="assets/logo-viva-church.png" alt="VIVA. Church" width="220" height="84"/>
+            </div>
+            <div class="eyebrow">Diaconia</div>
             <h1>Escala Inteligente</h1>
             <p class="lead">Central mensal da escala do diaconato — planejar, gerar e consultar com clareza.</p>
             <form id="login-form">
@@ -284,7 +287,9 @@ window.DiaconiaApp = (() => {
         <div class="app-shell${textoAnuncio ? " with-announce" : ""}">
           <aside class="sidebar" id="sidebar">
             <div class="brand">
-              <div class="brand-mark" aria-hidden="true"></div>
+              <div class="brand-logo-wrap">
+                <img class="brand-logo" src="assets/logo-viva-church.png" alt="VIVA. Church" width="168" height="64"/>
+              </div>
               <div class="brand-text">
                 <div class="brand-title">Diaconia</div>
                 <div class="brand-sub">${UI.esc(this.state.configuracoes?.nomeIgreja || "Escala Inteligente")}</div>

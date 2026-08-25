@@ -709,48 +709,102 @@ window.DiaconiaEngine = (() => {
     return Cal().escalasDoMes(state, ano, mes).filter((e) => e.gerada === true);
   }
 
-  function garantirEscalasMes(state, ano, mes) {
+  function garantirEscalasMes(state, ano, mes, opts = {}) {
     const Seed = window.DiaconiaSeed;
     const eqs = (state.equipes || []).filter((e) => e.ativa !== false).map((e) => e.id);
     if (!eqs.length) return 0;
     const horario = state.configuracoes?.horarioPadrao || "18:00";
     const datas = Cal().domingosDoMes(ano, mes);
     if (!datas.length) return 0;
-    const anteriores = Object.keys(state.escalas || {})
-      .filter((d) => d < datas[0])
-      .sort();
+
     let start = 0;
-    if (anteriores.length) {
-      const ultimaEq = state.escalas[anteriores[anteriores.length - 1]]?.equipesIds?.[0];
-      const idx = eqs.indexOf(ultimaEq);
-      start = idx >= 0 ? idx + 1 : 0;
+    if (opts.equipeInicioId && eqs.includes(opts.equipeInicioId)) {
+      start = eqs.indexOf(opts.equipeInicioId);
+    } else if (Number.isInteger(opts.startOffset)) {
+      start = ((opts.startOffset % eqs.length) + eqs.length) % eqs.length;
+    } else {
+      const anteriores = Object.keys(state.escalas || {})
+        .filter((d) => d < datas[0])
+        .sort();
+      if (anteriores.length) {
+        const ultimaEq = state.escalas[anteriores[anteriores.length - 1]]?.equipesIds?.[0];
+        const idx = eqs.indexOf(ultimaEq);
+        start = idx >= 0 ? idx + 1 : 0;
+      }
     }
+
+    const reatribuir = opts.reatribuir === true;
     let criadas = 0;
     datas.forEach((data, i) => {
-      if (state.escalas[data]) return;
       const eq = eqs[(start + i) % eqs.length];
-      const fids = funcoesParaData(state, data);
-      state.escalas[data] = Seed.criarEscalaBase(
-        data,
-        "culto",
-        "Culto",
-        horario,
-        [eq],
-        fids.length ? fids : funcoesPadraoAtivas(state)
-      );
-      criadas += 1;
+      if (!state.escalas[data]) {
+        const fids = funcoesParaData(state, data);
+        state.escalas[data] = Seed.criarEscalaBase(
+          data,
+          "culto",
+          "Culto",
+          horario,
+          [eq],
+          fids.length ? fids : funcoesPadraoAtivas(state)
+        );
+        criadas += 1;
+        return;
+      }
+      if (reatribuir) {
+        state.escalas[data].equipesIds = [eq];
+      }
     });
     return criadas;
   }
 
-  function gerarPeriodo(state, anoInicio, mesInicio, qtdMeses) {
+  /** Índice da equipe sugerida para o 1º domingo do mês (continua o rodízio). */
+  function sugerirEquipeInicioMes(state, ano, mes) {
+    const eqs = (state.equipes || []).filter((e) => e.ativa !== false).map((e) => e.id);
+    if (!eqs.length) return null;
+    const datas = Cal().domingosDoMes(ano, mes);
+    if (!datas.length) return eqs[0];
+    const anteriores = Object.keys(state.escalas || {})
+      .filter((d) => d < datas[0])
+      .sort();
+    if (!anteriores.length) return eqs[0];
+    const ultimaEq = state.escalas[anteriores[anteriores.length - 1]]?.equipesIds?.[0];
+    const idx = eqs.indexOf(ultimaEq);
+    if (idx < 0) return eqs[0];
+    return eqs[(idx + 1) % eqs.length];
+  }
+
+  function gerarPeriodo(state, anoInicio, mesInicio, qtdMeses, opts = {}) {
     let ano = anoInicio;
     let mes = mesInicio;
     let criadas = 0;
     let mesesGerados = 0;
     const qtd = Math.min(12, Math.max(1, Number(qtdMeses) || 1));
+    const eqs = (state.equipes || []).filter((e) => e.ativa !== false).map((e) => e.id);
+
+    let equipeInicioId = opts.equipeInicioId || null;
+    if (!equipeInicioId || !eqs.includes(equipeInicioId)) {
+      equipeInicioId = sugerirEquipeInicioMes(state, anoInicio, mesInicio) || eqs[0] || null;
+    }
+
     for (let i = 0; i < qtd; i++) {
-      criadas += garantirEscalasMes(state, ano, mes);
+      const mesOpts =
+        i === 0
+          ? { equipeInicioId, reatribuir: true }
+          : {
+              // Continua o rodízio a partir do último domingo do mês anterior
+              reatribuir: true,
+              startOffset: (() => {
+                if (!eqs.length) return 0;
+                const prevAno = mes === 1 ? ano - 1 : ano;
+                const prevMes = mes === 1 ? 12 : mes - 1;
+                const prevDoms = Cal().domingosDoMes(prevAno, prevMes);
+                const last = prevDoms[prevDoms.length - 1];
+                const lastEq = last ? state.escalas[last]?.equipesIds?.[0] : null;
+                const idx = eqs.indexOf(lastEq);
+                return idx >= 0 ? idx + 1 : 0;
+              })(),
+            };
+      criadas += garantirEscalasMes(state, ano, mes, mesOpts);
       gerarMes(state, ano, mes);
       mesesGerados += 1;
       mes += 1;
@@ -759,7 +813,7 @@ window.DiaconiaEngine = (() => {
         ano += 1;
       }
     }
-    return { mesesGerados, criadas };
+    return { mesesGerados, criadas, equipeInicioId };
   }
 
   function garantirEscalasAno(state, ano) {
@@ -1174,6 +1228,7 @@ window.DiaconiaEngine = (() => {
     escalasGeradasDoMes,
     garantirEscalasMes,
     garantirEscalasAno,
+    sugerirEquipeInicioMes,
     gerarPeriodo,
     gerarAno,
     alterarAtribuicao,
