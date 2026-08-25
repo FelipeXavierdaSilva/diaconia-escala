@@ -5,7 +5,7 @@
 window.DiaconiaApp = (() => {
   const UI = window.DiaconiaUI;
 
-  const PAGINAS_SERVICO = new Set(["minha", "avisos", "conta", "ocorrencias", "relatar"]);
+  const PAGINAS_SERVICO = new Set(["minha", "avisos", "conta"]);
 
   const app = {
     state: null,
@@ -104,7 +104,7 @@ window.DiaconiaApp = (() => {
           ir === "relatar" &&
           (sessao.papel === "diacono" || (sessao.papel === "lider" && sessao.diaconoId))
         ) {
-          this.page = "relatar";
+          this._abrirRelatarErro = true;
         }
         params.delete("ir");
         const q = params.toString();
@@ -197,7 +197,6 @@ window.DiaconiaApp = (() => {
         { id: "avisos", label: "Avisos" },
         { id: "ocorrencias", label: "Ocorrências" },
         { id: "conta", label: "Minha conta" },
-        { id: "relatar", label: "Relatar erro" },
       ];
     },
 
@@ -209,7 +208,6 @@ window.DiaconiaApp = (() => {
         { id: "avisos", label: "Meus avisos" },
         { id: "ocorrencias", label: "Ocorrências" },
         { id: "conta", label: "Minha conta" },
-        { id: "relatar", label: "Relatar erro" },
         { sep: true, label: "Gestão" },
         ...this.navLiderBase().filter((x) => x.id !== "ocorrencias"),
       ];
@@ -328,6 +326,11 @@ window.DiaconiaApp = (() => {
                 <span class="user-chip-name">${UI.esc(sessao.nome)}</span>
                 <span class="user-chip-role">${papelLabel}</span>
               </div>
+              ${
+                !isLider || naEscala
+                  ? `<button type="button" class="sidebar-relatar-erro" id="btn-relatar-erro" title="Só use se algo no portal falhou">Problema no sistema?</button>`
+                  : ""
+              }
               <button class="nav-btn nav-btn-logout" id="btn-logout">Sair</button>
             </div>
           </aside>
@@ -351,6 +354,12 @@ window.DiaconiaApp = (() => {
         this.renderLogin();
       });
 
+      root.querySelector("#btn-relatar-erro")?.addEventListener("click", () => {
+        window.DiaconiaViewsDiacono?.abrirRelatarErro?.(this, {
+          pagina: this.page,
+        });
+      });
+
       const main = root.querySelector("#main");
       const usarVisaoDiacono = this.paginaDeServico(this.page) && (!isLider || naEscala);
       const pack = usarVisaoDiacono
@@ -364,6 +373,13 @@ window.DiaconiaApp = (() => {
 
       main.innerHTML = pack.render(this);
       pack.bind?.(this, main);
+
+      if (this._abrirRelatarErro) {
+        this._abrirRelatarErro = false;
+        setTimeout(() => {
+          window.DiaconiaViewsDiacono?.abrirRelatarErro?.(this, { pagina: this.page });
+        }, 0);
+      }
     },
   };
 

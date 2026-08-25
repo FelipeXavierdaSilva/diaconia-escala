@@ -1570,7 +1570,7 @@ window.DiaconiaViewsDiacono = (() => {
     Ocr?.ensure?.(state);
     const isLider = sessao?.papel === "lider";
     const filtro = app.filtroOcrStatus || "";
-    let lista = Ocr.listar(state, { status: filtro || undefined });
+    const lista = Ocr.listar(state, { status: filtro || undefined, sessao });
     const datas = Ocr.datasCultoOpcoes(state);
     const hoje = Cal().hojeISO();
     const dataPadrao = datas.find((d) => d <= hoje) || datas[0] || hoje;
@@ -1590,20 +1590,24 @@ window.DiaconiaViewsDiacono = (() => {
     const rows = lista
       .map((o) => {
         const st = Ocr.statusInfo(o.status);
-        const acoes = isLider
-          ? `${UI().btnIcon({ icon: "eye", label: "Abrir", variant: "ghost", attrs: { "data-act": "ver-ocr", "data-id": o.id } })}
-             ${UI().btnIcon({ icon: "trash", label: "Excluir", variant: "danger", attrs: { "data-act": "del-ocr", "data-id": o.id } })}`
-          : "";
+        const vis = Ocr.visibilidadeInfo(o.visibilidade);
+        const prov = String(o.providencia || o.notaAdmin || "").trim();
+        const acoes = `${UI().btnIcon({ icon: "eye", label: "Abrir", variant: "ghost", attrs: { "data-act": "ver-ocr", "data-id": o.id } })}${
+          isLider
+            ? ` ${UI().btnIcon({ icon: "trash", label: "Excluir", variant: "danger", attrs: { "data-act": "del-ocr", "data-id": o.id } })}`
+            : ""
+        }`;
         return `<tr class="no-click">
           <td>${UI().esc(Cal().formatBRCurto(o.data))}
             <div class="muted" style="font-size:12px">${UI().esc(Cal().diaSemana(o.data))}</div>
           </td>
           <td><strong>${UI().esc(o.titulo)}</strong>
-            <div class="muted" style="font-size:12px">${UI().esc(Ocr.tipoLabel(o.tipo))} · ${UI().esc(o.criadoPorNome || "—")}</div>
+            <div class="muted" style="font-size:12px">${UI().esc(Ocr.tipoLabel(o.tipo))} · ${UI().esc(o.criadoPorNome || "—")} · ${UI().esc(vis.texto)}</div>
+            ${prov ? `<div class="ocr-providencia-preview">Providência: ${UI().esc(prov.slice(0, 90))}${prov.length > 90 ? "…" : ""}</div>` : ""}
           </td>
           <td><span class="badge badge-${st.tom}">${UI().esc(st.texto)}</span></td>
           <td class="muted" style="font-size:13px;max-width:260px">${UI().esc((o.descricao || "").slice(0, 100))}${(o.descricao || "").length > 100 ? "…" : ""}</td>
-          ${isLider ? `<td class="toolbar">${acoes}</td>` : ""}
+          <td class="toolbar">${acoes}</td>
         </tr>`;
       })
       .join("");
@@ -1612,7 +1616,11 @@ window.DiaconiaViewsDiacono = (() => {
       <div class="topbar">
         <div>
           <h1>Ocorrências</h1>
-          <p class="sub">Registre o que aconteceu durante o culto (ausência, incidente, observação). Bugs do portal ficam em Relatar erro.</p>
+          <p class="sub">${
+            isLider
+              ? "Todas as ocorrências do culto. Atualize o status e a providência — quem visualiza recebe o andamento."
+              : "Registre fatos do culto. Por padrão só a liderança vê; marque “expor à equipe” se quiser que todos saibam."
+          }</p>
         </div>
       </div>
 
@@ -1632,31 +1640,37 @@ window.DiaconiaViewsDiacono = (() => {
         <label class="field"><span>O que aconteceu?</span>
           <textarea id="ocr-desc" class="textarea" rows="4" placeholder="Descreva o fato durante o culto, horário aproximado e o que foi feito."></textarea>
         </label>
-        <button type="button" class="btn btn-accent" id="btn-enviar-ocr">Registrar ocorrência</button>
+        <label class="field field-check" style="margin-top:8px">
+          <input type="checkbox" id="ocr-expor"/>
+          <span>Expor esta situação para toda a equipe diaconal<br/>
+            <span class="muted" style="font-size:12px;font-weight:400">Sem marcar, só você e a liderança veem. Use quando o grupo precisar saber.</span>
+          </span>
+        </label>
+        <button type="button" class="btn btn-accent" id="btn-enviar-ocr" style="margin-top:12px">Registrar ocorrência</button>
       </div>
 
       <div class="panel">
         <div class="panel-head">
-          <h2>Registros</h2>
-          ${
-            isLider
-              ? `<label class="field" style="margin:0;min-width:160px"><span class="muted" style="font-size:12px">Status</span>
+          <h2>${isLider ? "Todas as ocorrências" : "Ocorrências visíveis para você"}</h2>
+          <label class="field" style="margin:0;min-width:160px"><span class="muted" style="font-size:12px">Status</span>
             <select id="filtro-ocr-st" class="select">
               <option value="">Todos</option>
               <option value="registrada" ${filtro === "registrada" ? "selected" : ""}>Registrada</option>
-              <option value="vista" ${filtro === "vista" ? "selected" : ""}>Vista pela liderança</option>
-              <option value="arquivada" ${filtro === "arquivada" ? "selected" : ""}>Arquivada</option>
+              <option value="em_providencia" ${filtro === "em_providencia" || filtro === "vista" ? "selected" : ""}>Em providência</option>
+              <option value="resolvida" ${filtro === "resolvida" || filtro === "arquivada" ? "selected" : ""}>Resolvida</option>
             </select>
-          </label>`
-              : ""
-          }
+          </label>
         </div>
         <div class="table-wrap">
           <table class="data">
-            <thead><tr><th>Culto</th><th>Ocorrência</th><th>Status</th><th>Detalhe</th>${isLider ? "<th></th>" : ""}</tr></thead>
+            <thead><tr><th>Culto</th><th>Ocorrência</th><th>Status</th><th>Detalhe</th><th></th></tr></thead>
             <tbody>${
               rows ||
-              `<tr class="no-click"><td colspan="${isLider ? 5 : 4}" class="empty">Nenhuma ocorrência registrada ainda.</td></tr>`
+              `<tr class="no-click"><td colspan="5" class="empty">${
+                isLider
+                  ? "Nenhuma ocorrência registrada ainda."
+                  : "Nenhuma ocorrência visível. As privadas ficam só com a liderança."
+              }</td></tr>`
             }</tbody>
           </table>
         </div>
@@ -1666,28 +1680,71 @@ window.DiaconiaViewsDiacono = (() => {
   function abrirDetalheOcorrencia(app, o) {
     const { state } = app;
     const Ocr = window.DiaconiaOcorrencias;
+    const sessao = window.DiaconiaAuth.sessao();
+    if (!Ocr.podeVer(o, sessao)) return UI().toast("Sem permissão para ver esta ocorrência.");
+
+    Ocr.marcarVisualizacao(state, o.id, sessao);
+    app.save();
+
+    const isLider = sessao?.papel === "lider";
+    const ehDono = o.criadoPor && o.criadoPor === sessao?.usuarioId;
     const st = Ocr.statusInfo(o.status);
+    const vis = Ocr.visibilidadeInfo(o.visibilidade);
+    const providencia = String(o.providencia || o.notaAdmin || "").trim();
+
+    const blocoProvidencia =
+      !isLider && providencia
+        ? `<div class="ocr-providencia-box">
+            <strong>Providência da liderança</strong>
+            <p style="white-space:pre-wrap;margin:6px 0 0">${UI().esc(providencia)}</p>
+          </div>`
+        : !isLider
+          ? `<p class="muted" style="font-size:13px">Ainda sem providência registrada pela liderança.</p>`
+          : "";
+
+    const formAdmin = isLider
+      ? `
+      <label class="field"><span>Status da ocorrência</span>
+        <select id="ocr-st" class="select">
+          <option value="registrada" ${o.status === "registrada" ? "selected" : ""}>Registrada</option>
+          <option value="em_providencia" ${o.status === "em_providencia" ? "selected" : ""}>Em providência</option>
+          <option value="resolvida" ${o.status === "resolvida" ? "selected" : ""}>Resolvida</option>
+        </select>
+      </label>
+      <label class="field"><span>Providência / resolução</span>
+        <textarea id="ocr-nota" class="textarea" rows="3" placeholder="O que foi feito ou combinado. Quem visualizou a ocorrência verá este texto.">${UI().esc(providencia)}</textarea>
+      </label>
+      <label class="field"><span>Visibilidade</span>
+        <select id="ocr-vis" class="select">
+          <option value="privada" ${o.visibilidade !== "equipe" ? "selected" : ""}>Só liderança (+ relator)</option>
+          <option value="equipe" ${o.visibilidade === "equipe" ? "selected" : ""}>Toda a equipe</option>
+        </select>
+      </label>`
+      : ehDono
+        ? `<label class="field"><span>Visibilidade</span>
+        <select id="ocr-vis" class="select">
+          <option value="privada" ${o.visibilidade !== "equipe" ? "selected" : ""}>Só liderança (+ você)</option>
+          <option value="equipe" ${o.visibilidade === "equipe" ? "selected" : ""}>Toda a equipe</option>
+        </select>
+      </label>
+      <p class="muted" style="font-size:12px;margin-top:0">Status: <span class="badge badge-${st.tom}">${UI().esc(st.texto)}</span></p>
+      ${blocoProvidencia}`
+        : `<p class="muted" style="font-size:13px;margin:0">Status: <span class="badge badge-${st.tom}">${UI().esc(st.texto)}</span> · ${UI().esc(vis.texto)}</p>
+      ${blocoProvidencia}`;
+
     UI().openModal(`
       <h2>${UI().esc(o.titulo)}</h2>
       <p class="muted" style="margin-top:0">
         ${UI().esc(Cal().diaSemana(o.data) + " — " + Cal().formatBR(o.data))} ·
         ${UI().esc(Ocr.tipoLabel(o.tipo))} · ${UI().esc(o.criadoPorNome || "—")} ·
-        <span class="badge badge-${st.tom}">${UI().esc(st.texto)}</span>
+        <span class="badge badge-${st.tom}">${UI().esc(st.texto)}</span> ·
+        <span class="badge badge-${vis.tom}">${UI().esc(vis.texto)}</span>
       </p>
       <p style="white-space:pre-wrap">${UI().esc(o.descricao)}</p>
-      <label class="field"><span>Status</span>
-        <select id="ocr-st" class="select">
-          <option value="registrada" ${o.status === "registrada" ? "selected" : ""}>Registrada</option>
-          <option value="vista" ${o.status === "vista" ? "selected" : ""}>Vista pela liderança</option>
-          <option value="arquivada" ${o.status === "arquivada" ? "selected" : ""}>Arquivada</option>
-        </select>
-      </label>
-      <label class="field"><span>Nota da liderança (opcional)</span>
-        <textarea id="ocr-nota" class="textarea" rows="3">${UI().esc(o.notaAdmin || "")}</textarea>
-      </label>
+      ${formAdmin}
       <div class="modal-actions">
-        <button type="button" class="btn btn-ghost" data-act="cancel">Fechar</button>
-        <button type="button" class="btn btn-accent" data-act="save">Salvar</button>
+        <button type="button" class="btn btn-ghost" data-act="cancel">${isLider || ehDono ? "Cancelar" : "Fechar"}</button>
+        ${isLider || ehDono ? `<button type="button" class="btn btn-accent" data-act="save">Salvar</button>` : ""}
       </div>
     `);
     const m = document.getElementById("modal-root");
@@ -1695,20 +1752,20 @@ window.DiaconiaViewsDiacono = (() => {
       const act = e.target.closest("[data-act]")?.dataset.act;
       if (act === "cancel") return UI().closeModal();
       if (act !== "save") return;
-      const res = Ocr.atualizar(
-        state,
-        o.id,
-        {
-          status: m.querySelector("#ocr-st")?.value || "registrada",
-          notaAdmin: m.querySelector("#ocr-nota")?.value || "",
-        },
-        window.DiaconiaAuth.sessao()
-      );
+      const patch = {};
+      if (isLider) {
+        patch.status = m.querySelector("#ocr-st")?.value || "registrada";
+        patch.providencia = m.querySelector("#ocr-nota")?.value || "";
+        patch.visibilidade = m.querySelector("#ocr-vis")?.value || "privada";
+      } else if (ehDono) {
+        patch.visibilidade = m.querySelector("#ocr-vis")?.value || "privada";
+      }
+      const res = Ocr.atualizar(state, o.id, patch, sessao);
       if (!res.ok) return UI().toast(res.erro);
       UI().closeModal();
       app.save();
       app.render();
-      UI().toast("Ocorrência atualizada.");
+      UI().toast(isLider ? "Status e providência salvos. Quem visualizou foi avisado." : "Visibilidade atualizada.");
     });
   }
 
@@ -1724,6 +1781,7 @@ window.DiaconiaViewsDiacono = (() => {
 
     root.querySelector("#btn-enviar-ocr")?.addEventListener("click", () => {
       if (!Ocr) return UI().toast("Serviço de ocorrências indisponível.");
+      const expor = !!root.querySelector("#ocr-expor")?.checked;
       const res = Ocr.criar(
         state,
         {
@@ -1731,13 +1789,18 @@ window.DiaconiaViewsDiacono = (() => {
           tipo: root.querySelector("#ocr-tipo")?.value,
           titulo: root.querySelector("#ocr-titulo")?.value,
           descricao: root.querySelector("#ocr-desc")?.value,
+          visibilidade: expor ? "equipe" : "privada",
         },
         sessao
       );
       if (!res.ok) return UI().toast(res.erro);
       app.save();
       app.render();
-      UI().toast("Ocorrência registrada.");
+      UI().toast(
+        expor
+          ? "Ocorrência registrada e compartilhada com a equipe."
+          : "Ocorrência registrada (visível só para você e a liderança)."
+      );
     });
 
     root.querySelectorAll('[data-act="del-ocr"]').forEach((btn) => {
@@ -1764,88 +1827,78 @@ window.DiaconiaViewsDiacono = (() => {
     });
   }
 
-  /* ——— Relatar erro (bugs do sistema) ——— */
-  function relatar(app) {
+  /* ——— Relatar erro (sob demanda — sem aba no menu) ——— */
+  function abrirRelatarErro(app, opts = {}) {
     const { state } = app;
     const sessao = window.DiaconiaAuth.sessao();
     const Err = window.DiaconiaErrors;
-    Err?.ensure?.(state);
+    if (!Err) return UI().toast("Serviço de relatos indisponível.");
+    Err.ensure?.(state);
+
+    const areas = (Err.AREAS || [])
+      .map(
+        (a) =>
+          `<option value="${a.id}" ${opts.area === a.id ? "selected" : ""}>${UI().esc(a.label)}</option>`
+      )
+      .join("");
+
     const meus = (state.relatosErro || [])
       .filter((r) => r.criadoPor === sessao?.usuarioId)
-      .sort((a, b) => String(b.criadoEm).localeCompare(String(a.criadoEm)));
+      .sort((a, b) => String(b.criadoEm).localeCompare(String(a.criadoEm)))
+      .slice(0, 5);
 
-    const areas = (Err?.AREAS || [])
-      .map((a) => `<option value="${a.id}">${UI().esc(a.label)}</option>`)
-      .join("");
+    const listaMeus = meus.length
+      ? `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+          <p class="muted" style="font-size:12px;margin:0 0 8px">Seus últimos relatos</p>
+          <ul style="margin:0;padding-left:18px;font-size:13px">
+            ${meus
+              .map((r) => {
+                const st = Err.statusInfo(r.status);
+                return `<li style="margin-bottom:4px"><strong>${UI().esc(r.titulo)}</strong> · <span class="badge badge-${st.tom}">${UI().esc(st.texto)}</span></li>`;
+              })
+              .join("")}
+          </ul>
+        </div>`
+      : "";
 
-    const rows = meus
-      .map((r) => {
-        const st = Err.statusInfo(r.status);
-        return `<tr class="no-click">
-          <td>${UI().esc(r.criadoEm ? new Date(r.criadoEm).toLocaleString("pt-BR") : "—")}</td>
-          <td><strong>${UI().esc(r.titulo)}</strong>
-            <div class="muted" style="font-size:12px">${UI().esc(Err.areaLabel(r.area))}</div>
-          </td>
-          <td><span class="badge badge-${st.tom}">${UI().esc(st.texto)}</span></td>
-          <td class="muted" style="font-size:13px;max-width:280px">${UI().esc((r.descricao || "").slice(0, 120))}${(r.descricao || "").length > 120 ? "…" : ""}</td>
-        </tr>`;
-      })
-      .join("");
-
-    return `
-      <div class="topbar">
-        <div>
-          <h1>Relatar erro</h1>
-          <p class="sub">Bugs do portal: tentou fazer algo e não conseguiu, ou apareceu mensagem de que não deu certo. Fatos do culto ficam em Ocorrências.</p>
-        </div>
+    UI().openModal(`
+      <h2>Relatar erro do sistema</h2>
+      <p class="muted" style="margin-top:0">Use só se algo no portal falhou (botão, tela, mensagem de erro). Troca de escala ou “não posso ir” ficam em Avisos. Fatos do culto ficam em Ocorrências.</p>
+      <label class="field"><span>Onde no sistema?</span>
+        <select id="err-area" class="select">${areas}</select>
+      </label>
+      <label class="field"><span>Título curto</span>
+        <input id="err-titulo" class="input" maxlength="120" placeholder="Ex.: Botão salvar não responde" value="${UI().esc(opts.titulo || "")}"/>
+      </label>
+      <label class="field"><span>O que aconteceu?</span>
+        <textarea id="err-desc" class="textarea" rows="5" placeholder="O que você tentou, o que esperava e o que apareceu.">${UI().esc(opts.descricao || "")}</textarea>
+      </label>
+      ${listaMeus}
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" data-act="cancel">Cancelar</button>
+        <button type="button" class="btn btn-accent" data-act="save">Enviar relato</button>
       </div>
+    `);
 
-      <div class="panel" style="margin-bottom:16px">
-        <h2 style="margin-top:0">Novo relato</h2>
-        <p class="muted settings-hint" style="margin-top:0">Não use para troca de escala ou “não posso ir” — isso fica em Avisos.</p>
-        <label class="field"><span>Onde no sistema?</span>
-          <select id="err-area" class="select">${areas}</select>
-        </label>
-        <label class="field"><span>Título curto</span>
-          <input id="err-titulo" class="input" maxlength="120" placeholder="Ex.: Botão salvar não responde"/>
-        </label>
-        <label class="field"><span>O que aconteceu?</span>
-          <textarea id="err-desc" class="textarea" rows="5" placeholder="O que você tentou fazer, o que esperava e o que apareceu (mensagem de erro, tela em branco, etc.)."></textarea>
-        </label>
-        <div class="toolbar">
-          <button type="button" class="btn btn-accent" id="btn-enviar-erro">Enviar relato</button>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head"><h2>Meus relatos</h2></div>
-        <div class="table-wrap">
-          <table class="data">
-            <thead><tr><th>Quando</th><th>Problema</th><th>Status</th><th>Detalhe</th></tr></thead>
-            <tbody>${rows || `<tr class="no-click"><td colspan="4" class="empty">Você ainda não enviou relatos.</td></tr>`}</tbody>
-          </table>
-        </div>
-      </div>`;
-  }
-
-  function bindRelatar(app, root) {
-    root.querySelector("#btn-enviar-erro")?.addEventListener("click", () => {
-      const { state } = app;
-      const sessao = window.DiaconiaAuth.sessao();
-      if (!window.DiaconiaErrors) return UI().toast("Serviço de relatos indisponível.");
-      const res = window.DiaconiaErrors.criar(
+    const m = document.getElementById("modal-root");
+    m.addEventListener("click", (e) => {
+      const act = e.target.closest("[data-act]")?.dataset.act;
+      if (act === "cancel") return UI().closeModal();
+      if (act !== "save") return;
+      const res = Err.criar(
         state,
         {
-          area: root.querySelector("#err-area")?.value || "outro",
-          titulo: root.querySelector("#err-titulo")?.value || "",
-          descricao: root.querySelector("#err-desc")?.value || "",
-          pagina: app.page || "relatar",
+          area: m.querySelector("#err-area")?.value || "outro",
+          titulo: m.querySelector("#err-titulo")?.value || "",
+          descricao: m.querySelector("#err-desc")?.value || "",
+          pagina: opts.pagina || app.page || "",
+          tecnico: opts.tecnico || null,
         },
         sessao
       );
       if (!res.ok) return UI().toast(res.erro);
+      UI().closeModal();
       app.save();
-      app.render();
       UI().toast("Relato enviado. A liderança foi notificada.");
     });
   }
@@ -1855,8 +1908,7 @@ window.DiaconiaViewsDiacono = (() => {
     avisos: { render: avisos, bind: bindAvisos },
     conta: { render: conta, bind: bindConta },
     ocorrencias: { render: ocorrencias, bind: bindOcorrencias },
-    relatar: { render: relatar, bind: bindRelatar },
   };
 
-  return { pages };
+  return { pages, abrirRelatarErro };
 })();

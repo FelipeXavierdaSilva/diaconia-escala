@@ -10,7 +10,7 @@ window.DiaconiaUI = (() => {
       .replace(/"/g, "&quot;");
   }
 
-  function toast(msg) {
+  function toast(msg, opts = {}) {
     let wrap = $("#toast-wrap");
     if (!wrap) {
       wrap = document.createElement("div");
@@ -20,9 +20,31 @@ window.DiaconiaUI = (() => {
     }
     const el = document.createElement("div");
     el.className = "toast";
-    el.textContent = msg;
+    const texto = String(msg ?? "");
+    const podeRelatar =
+      opts.relatar === true ||
+      (/não (foi|foi possível|consegu|encontrad)|falh|inválid|erro|indisponív/i.test(texto) &&
+        opts.relatar !== false);
+
+    if (podeRelatar && typeof window.DiaconiaViewsDiacono?.abrirRelatarErro === "function") {
+      el.innerHTML = `<span class="toast-msg"></span> <button type="button" class="toast-relatar">Relatar</button>`;
+      el.querySelector(".toast-msg").textContent = texto;
+      el.querySelector(".toast-relatar")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const app = window.DiaconiaApp;
+        if (!app) return;
+        window.DiaconiaViewsDiacono.abrirRelatarErro(app, {
+          titulo: texto.slice(0, 100),
+          descricao: `Ao usar o sistema apareceu: “${texto}”.`,
+          pagina: app.page || "",
+          area: "outro",
+        });
+      });
+    } else {
+      el.textContent = texto;
+    }
     wrap.appendChild(el);
-    setTimeout(() => el.remove(), 3200);
+    setTimeout(() => el.remove(), podeRelatar ? 5200 : 3200);
   }
 
   function badgeStatus(st) {
