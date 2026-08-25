@@ -220,6 +220,50 @@ const semWa = WA.compartilharCredenciaisUsuario(
 );
 assert("sem whatsapp falha", semWa.ok === false);
 
+// Emergência sem cobertura — líderes selecionados
+state.lideres = [
+  { id: "l1", nome: "Líder Um", whatsapp: "47991110001", ativo: true },
+  { id: "l2", nome: "Líder Dois", whatsapp: "47991110002", ativo: true },
+  { id: "l3", nome: "Líder Três", whatsapp: "47991110003", ativo: false },
+];
+state.configuracoes.whatsapp = {
+  ...WA.cfgPadrao(),
+  modo: "manual",
+  notificarEmergenciaSemCobertura: true,
+  lideresRecebemEmergenciaIds: ["l1", "l2"],
+};
+sandbox.window.DiaconiaHistory = { add() {} };
+const msgEm = WA.montarMensagem(state, "emergencia_sem_cobertura", {
+  nomeLider: "Líder Um",
+  diaconoNome: "João Silva",
+  data: "2026-09-13",
+});
+assert("mensagem emergência menciona diácono", msgEm.includes("João Silva"));
+assert("mensagem emergência menciona emergência", /emergência/i.test(msgEm));
+assert("mensagem emergência menciona data BR", msgEm.includes("13/09/2026"));
+
+const destTodos = WA.lideresDestino(state, null);
+assert("lideresDestino null = ativos", destTodos.length === 2 && destTodos.every((l) => l.ativo !== false));
+const destNenhum = WA.lideresDestino(state, []);
+assert("lideresDestino [] = ninguém", destNenhum.length === 0);
+const destFiltro = WA.lideresDestino(state, ["l1"]);
+assert("lideresDestino [l1] = um", destFiltro.length === 1 && destFiltro[0].id === "l1");
+
+const em = WA.notificarEmergenciaSemCobertura(state, {
+  diaconoId: null,
+  diaconoNome: "João Silva",
+  data: "2026-09-13",
+});
+assert("notificarEmergenciaSemCobertura ok", em.ok === true, em.erro || "");
+assert("notificarEmergenciaSemCobertura enviou 2", em.enviados === 2, String(em.enviados));
+
+state.configuracoes.whatsapp.lideresRecebemEmergenciaIds = [];
+const emVazio = WA.notificarEmergenciaSemCobertura(state, {
+  diaconoNome: "João",
+  data: "2026-09-13",
+});
+assert("emergência sem líderes selecionados falha", emVazio.ok === false);
+
 function httpGet(url) {
   return new Promise((resolve) => {
     const req = https.get(

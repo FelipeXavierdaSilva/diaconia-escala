@@ -74,6 +74,7 @@ for (const f of [
   "js/core/storage.js",
   "js/core/auth.js",
   "js/services/history.js",
+  "js/services/escala-arquivo.js",
   "js/services/restrictions.js",
   "js/services/swaps.js",
   "js/services/whatsapp.js",

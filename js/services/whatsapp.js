@@ -28,6 +28,17 @@ window.DiaconiaWhatsApp = (() => {
       notificarRestricao: true,
       /** Avisar diácono quando líder aprova ou recusa o aviso */
       notificarStatusRestricao: true,
+      /**
+       * Avisar líderes quando o diácono toca “Estou ciente, mas não consigo agora”
+       * (emergência sem pedir cobertura).
+       */
+      notificarEmergenciaSemCobertura: true,
+      /**
+       * IDs de líderes que recebem o aviso de emergência.
+       * null/undefined = ainda não configurado → todos os ativos;
+       * [] = ninguém; [ids] = só esses.
+       */
+      lideresRecebemEmergenciaIds: null,
       notificarEscalaGerada: false,
       portalBaseUrl: "",
       apiUrl: "",
@@ -46,7 +57,12 @@ window.DiaconiaWhatsApp = (() => {
     if (!state.configuracoes.whatsapp || typeof state.configuracoes.whatsapp !== "object") {
       state.configuracoes.whatsapp = cfgPadrao();
     } else {
-      state.configuracoes.whatsapp = { ...cfgPadrao(), ...state.configuracoes.whatsapp };
+      const prev = state.configuracoes.whatsapp;
+      state.configuracoes.whatsapp = { ...cfgPadrao(), ...prev };
+      // Preserva null explícito (ainda não configurado → todos)
+      if (prev.lideresRecebemEmergenciaIds === null) {
+        state.configuracoes.whatsapp.lideresRecebemEmergenciaIds = null;
+      }
     }
     if (!Array.isArray(state.whatsappFila)) state.whatsappFila = [];
     if (!Array.isArray(state.whatsappLog)) state.whatsappLog = [];
@@ -178,6 +194,19 @@ window.DiaconiaWhatsApp = (() => {
       };
     }
     return { ok: true, numero, nome: lider.nome, lider };
+  }
+
+  /**
+   * Líderes ativos que devem receber um tipo de aviso.
+   * @param {string[]|null|undefined} idsSelecionados
+   *   null/undefined = todos os ativos; [] = ninguém; [ids] = só esses.
+   */
+  function lideresDestino(state, idsSelecionados) {
+    const ativos = (state.lideres || []).filter((l) => l.ativo !== false);
+    if (idsSelecionados == null) return ativos;
+    if (!Array.isArray(idsSelecionados) || !idsSelecionados.length) return [];
+    const set = new Set(idsSelecionados.filter(Boolean));
+    return ativos.filter((l) => set.has(l.id));
   }
 
   function portalUrl(state, query = "") {
@@ -486,6 +515,20 @@ window.DiaconiaWhatsApp = (() => {
         `📝 *Motivo:* ${motivo || "Indisponibilidade"}${obs}\n` +
         `⛪ *${igreja}*\n\n` +
         `Isso já vale para a geração da escala. Veja em *Avisos*:\n${link}`
+      );
+    }
+
+    if (tipo === "emergencia_sem_cobertura") {
+      const { nomeLider, diaconoNome, data } = dados;
+      const link = portalUrl(state, "?ir=restricoes");
+      const dataBr = Cal().formatBR(data);
+
+      return (
+        `Olá, ${primeiroNome(nomeLider) || nomeLider}! 🚨\n\n` +
+        `*${diaconoNome}* *não poderá comparecer* em *${dataBr}* porque teve uma *emergência*.\n\n` +
+        `Ainda *não pediu cobertura* — a escala precisa de atenção da liderança.\n` +
+        `⛪ *${igreja}*\n\n` +
+        `Veja em *Avisos*:\n${link}`
       );
     }
 
@@ -806,6 +849,66 @@ window.DiaconiaWhatsApp = (() => {
     return { ok: resultados.some((r) => r.ok), resultados };
   }
 
+  /**
+   * Diácono tocou “Estou ciente, mas não consigo agora”:
+   * avisa os líderes escolhidos em Configurações → WhatsApp.
+   */
+  function notificarEmergenciaSemCobertura(state, { diaconoId, diaconoNome, data } = {}) {
+    ensure(state);
+    const c = cfg(state);
+    if (!c.ativo || c.notificarEmergenciaSemCobertura === false) {
+      return { ok: false, ignorado: true, erro: "Notificação de emergência desligada." };
+    }
+    if (!data) return { ok: false, erro: "Data não informada." };
+
+    const lideres = lideresDestino(state, c.lideresRecebemEmergenciaIds);
+    const comNumero = lideres
+      .map((l) => ({ l, dest: numeroDeLider(state, l) }))
+      .filter((x) => x.dest.ok);
+
+    if (!comNumero.length) {
+      return {
+        ok: false,
+        erro:
+          lideres.length === 0
+            ? "Nenhum líder selecionado para receber este aviso (Configurações → WhatsApp)."
+            : "Nenhum líder selecionado tem WhatsApp válido cadastrado.",
+      };
+    }
+
+    const nome =
+      diaconoNome ||
+      (diaconoId ? nomeDiacono(state, diaconoId) : null) ||
+      "Um diácono";
+
+    const resultados = comNumero.map(({ l, dest }, idx) => {
+      const texto = montarMensagem(state, "emergencia_sem_cobertura", {
+        nomeLider: l.nome,
+        diaconoNome: nome,
+        data,
+      });
+      return enviar(state, {
+        tipo: "emergencia_sem_cobertura",
+        paraNumero: dest.numero,
+        texto,
+        meta: {
+          liderId: l.id,
+          diaconoId: diaconoId || null,
+          data,
+          nome: dest.nome,
+        },
+        abrirNoNavegador: c.modo === MODOS.manual && idx === 0,
+      });
+    });
+
+    return {
+      ok: resultados.some((r) => r.ok),
+      resultados,
+      enviados: resultados.filter((r) => r.ok).length,
+      total: comNumero.length,
+    };
+  }
+
   function notificarStatusRestricao(state, restricao, { status } = {}) {
     ensure(state);
     const c = cfg(state);
@@ -877,7 +980,9 @@ window.DiaconiaWhatsApp = (() => {
     notificarCadastroUsuario,
     compartilharCredenciaisUsuario,
     notificarAvisoRestricao,
+    notificarEmergenciaSemCobertura,
     notificarStatusRestricao,
+    lideresDestino,
     processarFila,
     resumoCadastro,
   };

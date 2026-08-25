@@ -420,7 +420,7 @@ code {
 }
 
 #app.has-announce .mobile-toggle {
-  top: calc(14px + var(--announce-h, 38px));
+  top: calc(max(14px, env(safe-area-inset-top, 0px)) + var(--announce-h, 38px));
 }
 
 /* Sidebar herda a altura do shell — não recalcular 100dvh (cortava o rodapé) */
@@ -1511,6 +1511,13 @@ table.data tbody tr.no-click {
   color: #fff;
 }
 
+.hist-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
 .escalas-body {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
@@ -2252,9 +2259,21 @@ table.data tbody tr.no-click {
 .mobile-toggle {
   display: none;
   position: fixed;
-  top: 14px;
-  left: 14px;
-  z-index: 50;
+  top: max(14px, env(safe-area-inset-top, 0px));
+  left: max(14px, env(safe-area-inset-left, 0px));
+  z-index: 45;
+}
+
+.sidebar-backdrop {
+  display: none;
+}
+
+.sidebar-close {
+  display: none;
+}
+
+.servico-shortcut {
+  display: none;
 }
 
 @media (max-width: 960px) {
@@ -2267,23 +2286,124 @@ table.data tbody tr.no-click {
     position: fixed;
     inset: 0 auto 0 0;
     width: min(var(--nav-w), 86vw);
+    max-width: 300px;
     transform: translateX(-105%);
     transition: transform 0.25s ease;
-    z-index: 40;
+    z-index: 55;
     height: 100dvh;
+    padding-top: max(12px, env(safe-area-inset-top, 0px));
+    padding-bottom: max(14px, env(safe-area-inset-bottom, 0px));
   }
 
   .sidebar.open {
     transform: none;
+    box-shadow: 8px 0 32px rgba(0, 0, 0, 0.35);
+  }
+
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: rgba(8, 28, 34, 0.45);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+
+  .sidebar-backdrop.visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .sidebar-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    top: max(10px, env(safe-area-inset-top, 0px));
+    right: 10px;
+    width: 36px;
+    height: 36px;
+    border: 0;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    z-index: 2;
+  }
+
+  .sidebar-close:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
+
+  .brand {
+    padding-right: 44px;
+  }
+
+  /* Meu serviço fica fixo no topo do menu enquanto a gestão rola */
+  .sidebar-nav {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .nav-zone-servico {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    margin-bottom: 8px;
+    background: rgba(13, 63, 76, 0.97);
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+      0 8px 16px rgba(0, 0, 0, 0.2);
   }
 
   .mobile-toggle {
     display: inline-flex;
   }
 
+  #app.nav-open .mobile-toggle {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
   .main {
     padding: 56px 14px 24px;
+    padding-top: calc(56px + env(safe-area-inset-top, 0px));
     height: 100dvh;
+  }
+
+  .servico-shortcut {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 0 0 14px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(15, 76, 92, 0.1), rgba(227, 100, 20, 0.12));
+    border: 1px solid rgba(15, 76, 92, 0.18);
+  }
+
+  .servico-shortcut p {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.35;
+    color: var(--ink);
+  }
+
+  .servico-shortcut strong {
+    display: block;
+    font-size: 14px;
+    color: var(--teal);
+    margin-bottom: 2px;
+  }
+
+  .servico-shortcut .btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
   }
 
   .grid-2,

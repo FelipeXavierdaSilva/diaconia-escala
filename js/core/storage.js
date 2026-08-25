@@ -50,6 +50,16 @@ window.DiaconiaStorage = (() => {
       }
       base.lideres = [...byId.values()];
     }
+    {
+      const byId = new Map();
+      for (const item of [...(remote.escalasArquivo || []), ...(local.escalasArquivo || [])]) {
+        if (!item?.id || byId.has(item.id)) continue;
+        byId.set(item.id, item);
+      }
+      base.escalasArquivo = [...byId.values()]
+        .sort((a, b) => String(b.em || "").localeCompare(String(a.em || "")))
+        .slice(0, 80);
+    }
     return base;
   }
 
@@ -348,6 +358,7 @@ window.DiaconiaStorage = (() => {
     if (!Array.isArray(state.relatosErro)) state.relatosErro = [];
     if (!Array.isArray(state.ocorrencias)) state.ocorrencias = [];
     if (!Array.isArray(state.comunicados)) state.comunicados = [];
+    if (!Array.isArray(state.escalasArquivo)) state.escalasArquivo = [];
     if (typeof window.DiaconiaWhatsApp?.ensure === "function") {
       window.DiaconiaWhatsApp.ensure(state);
     } else if (!state.configuracoes.whatsapp) {
@@ -361,6 +372,8 @@ window.DiaconiaStorage = (() => {
         notificarCadastroUsuario: true,
         notificarRestricao: true,
         notificarStatusRestricao: true,
+        notificarEmergenciaSemCobertura: true,
+        lideresRecebemEmergenciaIds: null,
         notificarEscalaGerada: false,
         portalBaseUrl: "",
         apiUrl: "",

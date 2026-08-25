@@ -421,10 +421,12 @@ window.DiaconiaPDF = (() => {
   return {
     escalasDoMes,
     escalaIncompleta,
+    prepararLista,
     prepararMes,
     prepararTudo,
     prepararEscala,
     imprimir,
+    gerarComPreparacao,
     gerarEscala,
     gerarMes,
     gerarPeriodo,

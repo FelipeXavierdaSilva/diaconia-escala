@@ -901,6 +901,7 @@ window.DiaconiaViewsDiacono = (() => {
       const x = ev.target.closest("[data-act]")?.dataset.act;
       if (x === "ok") {
         UI().closeModal();
+        avisarLideresEmergenciaSemCobertura(app, dataSel);
         app.page = "avisos";
         app.render();
       }
@@ -909,6 +910,43 @@ window.DiaconiaViewsDiacono = (() => {
         formTroca(app, null, { data: dataSel });
       }
     });
+  }
+
+  /** WhatsApp aos líderes configurados: diácono não consegue pedir cobertura agora (emergência). */
+  function avisarLideresEmergenciaSemCobertura(app, dataSel) {
+    const { state } = app;
+    const did = diaconoId(app);
+    const nome =
+      state.diaconos.find((d) => d.id === did)?.nome ||
+      window.DiaconiaAuth.sessao()?.nome ||
+      "Um diácono";
+
+    if (typeof window.DiaconiaWhatsApp?.notificarEmergenciaSemCobertura !== "function") {
+      UI().toast("Aviso registrado.");
+      return;
+    }
+
+    const wa = window.DiaconiaWhatsApp.notificarEmergenciaSemCobertura(state, {
+      diaconoId: did,
+      diaconoNome: nome,
+      data: dataSel,
+    });
+    app.save();
+
+    if (wa?.ignorado) {
+      UI().toast("Aviso registrado.");
+      return;
+    }
+    if (wa?.ok) {
+      const n = wa.enviados || wa.resultados?.filter((r) => r.ok).length || 0;
+      UI().toast(
+        n > 1
+          ? `Liderança avisada por WhatsApp (${n} líderes) — emergência sem cobertura.`
+          : "Liderança avisada por WhatsApp — emergência sem cobertura."
+      );
+      return;
+    }
+    UI().toast(wa?.erro || "Aviso registrado. Não foi possível abrir o WhatsApp dos líderes.");
   }
 
   /** Formulário curto: data + observação, sempre tipo indisponível */
@@ -1102,6 +1140,7 @@ window.DiaconiaViewsDiacono = (() => {
           const x = ev.target.closest("[data-act]")?.dataset.act;
           if (x === "ok") {
             UI().closeModal();
+            avisarLideresEmergenciaSemCobertura(app, data);
             app.page = "avisos";
             app.render();
           }

@@ -338,11 +338,14 @@ window.DiaconiaApp = (() => {
 
       const root = document.getElementById("app");
       root.classList.toggle("has-announce", !!textoAnuncio);
+      root.classList.remove("nav-open");
       root.innerHTML = `
         ${anuncioHtml}
-        <button class="btn btn-primary mobile-toggle" id="menu-toggle" aria-label="Menu">☰</button>
+        <button class="btn btn-primary mobile-toggle" id="menu-toggle" aria-label="Abrir menu" aria-expanded="false" aria-controls="sidebar">☰</button>
+        <div class="sidebar-backdrop" id="sidebar-backdrop" hidden></div>
         <div class="app-shell${textoAnuncio ? " with-announce" : ""}">
           <aside class="sidebar" id="sidebar">
+            <button type="button" class="sidebar-close" id="sidebar-close" aria-label="Fechar menu">×</button>
             <div class="brand">
               <div class="brand-logo-wrap">
                 <img class="brand-logo" src="assets/logo-viva-church.png" alt="VIVA. Church" width="168" height="64"/>
@@ -371,14 +374,34 @@ window.DiaconiaApp = (() => {
           <main class="main" id="main"></main>
         </div>`;
 
-      root.querySelector("#menu-toggle")?.addEventListener("click", () => {
-        root.querySelector("#sidebar")?.classList.toggle("open");
+      const sidebar = root.querySelector("#sidebar");
+      const backdrop = root.querySelector("#sidebar-backdrop");
+      const menuToggle = root.querySelector("#menu-toggle");
+
+      const setNavOpen = (open) => {
+        sidebar?.classList.toggle("open", open);
+        root.classList.toggle("nav-open", open);
+        if (backdrop) {
+          backdrop.hidden = !open;
+          backdrop.classList.toggle("visible", open);
+        }
+        if (menuToggle) menuToggle.setAttribute("aria-expanded", open ? "true" : "false");
+        if (open) {
+          const navEl = sidebar?.querySelector(".sidebar-nav");
+          if (navEl) navEl.scrollTop = 0;
+        }
+      };
+
+      menuToggle?.addEventListener("click", () => {
+        setNavOpen(!sidebar?.classList.contains("open"));
       });
+      root.querySelector("#sidebar-close")?.addEventListener("click", () => setNavOpen(false));
+      backdrop?.addEventListener("click", () => setNavOpen(false));
 
       root.querySelectorAll("[data-page]").forEach((btn) => {
         btn.addEventListener("click", () => {
           this.page = btn.dataset.page;
-          root.querySelector("#sidebar")?.classList.remove("open");
+          setNavOpen(false);
           this.render();
         });
       });

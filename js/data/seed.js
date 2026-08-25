@@ -426,6 +426,7 @@ window.DiaconiaSeed = (() => {
       comunicados: [],
       relatosErro: [],
       ocorrencias: [],
+      escalasArquivo: [],
       configuracoes: {
         nomeIgreja: "Diaconia Viva",
         horarioPadrao: "18:00",
@@ -443,6 +444,8 @@ window.DiaconiaSeed = (() => {
           notificarCadastroUsuario: true,
           notificarRestricao: true,
           notificarStatusRestricao: true,
+          notificarEmergenciaSemCobertura: true,
+          lideresRecebemEmergenciaIds: null,
           notificarEscalaGerada: false,
           portalBaseUrl: "",
           apiUrl: "",

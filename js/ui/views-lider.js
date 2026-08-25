@@ -282,6 +282,15 @@ window.DiaconiaViewsLider = (() => {
       })
       .join("");
 
+    const sessao = window.DiaconiaAuth.sessao();
+    const liderNaEscala = sessao?.papel === "lider" && !!sessao?.diaconoId;
+    const atalhoServico = liderNaEscala
+      ? `<div class="servico-shortcut">
+          <p><strong>Sua escala pessoal</strong>Veja funções, avisos e o que você serve neste mês.</p>
+          <button type="button" class="btn btn-primary" id="btn-minha-escala">Minha escala</button>
+        </div>`
+      : "";
+
     return `
       <div class="page-fit">
       <div class="topbar">
@@ -293,6 +302,8 @@ window.DiaconiaViewsLider = (() => {
           ${UI().mesSelect(ano, mes)}
         </div>
       </div>
+
+      ${atalhoServico}
 
       <div class="toolbar toolbar-escalas">
         <button class="btn btn-accent" id="btn-gerar">Gerar escala</button>
@@ -333,6 +344,11 @@ window.DiaconiaViewsLider = (() => {
   function bindEscalas(app, root) {
     bindMesSelectors(app, root);
     const { state, ano, mes } = ctx(app);
+
+    root.querySelector("#btn-minha-escala")?.addEventListener("click", () => {
+      app.page = "minha";
+      app.render();
+    });
 
     const openDay = (data) => {
       window.DiaconiaEscalaModal.render(state, data, {
@@ -401,15 +417,17 @@ window.DiaconiaViewsLider = (() => {
     UI().bindBulkTable(root, "escalas-lista", {
       itemLabel: "escala(s)",
       onDelete: async (ids) => {
-        for (const data of ids) delete state.escalas[data];
-        window.DiaconiaHistory.add(state, {
-          tipo: "escala",
-          mensagem: `${ids.length} escala(s) excluída(s) em massa.`,
-          usuarioId: ctx(app).sessao()?.usuarioId,
-        });
+        const res = window.DiaconiaEscalaArquivo?.excluirDias
+          ? window.DiaconiaEscalaArquivo.excluirDias(state, ids, ctx(app).sessao())
+          : null;
+        if (!res) {
+          for (const data of ids) Engine().excluirEscalaDia(state, data);
+        } else if (!res.ok) {
+          return UI().toast(res.erro || "Não foi possível excluir.");
+        }
         app.save();
         app.render();
-        UI().toast(`${ids.length} escala(s) excluída(s).`);
+        UI().toast(`${ids.length} escala(s) excluída(s). Cópia no arquivo de escalas.`);
       },
     });
   }
@@ -490,9 +508,22 @@ window.DiaconiaViewsLider = (() => {
       const equipeInicioId = root.querySelector("#g-eq-inicio")?.value || sugerida;
       if (!equipeInicioId) return UI().toast("Cadastre e ative pelo menos uma equipe.");
 
+      const Arq = window.DiaconiaEscalaArquivo;
+      const datasGeracao = Arq?.datasPeriodo?.(ano, mes, qtdMeses) || [];
+      Arq?.guardarDatas?.(state, datasGeracao, {
+        motivo: "antes_gerar",
+        mensagem: `Cópia de segurança antes de gerar ${qtdMeses} mês(es) a partir de ${Cal().nomeMes(mes)}/${ano}.`,
+        usuarioId: ctx(app).sessao()?.usuarioId,
+      });
+
       const res = Engine().gerarPeriodo(state, ano, mes, qtdMeses, { equipeInicioId });
       const nomeEq =
         eqsAtivas.find((x) => x.id === (res.equipeInicioId || equipeInicioId))?.nome || equipeInicioId;
+      Arq?.guardarDatas?.(state, datasGeracao, {
+        motivo: "gerar",
+        mensagem: `Escala gerada: ${qtdMeses} mês(es) a partir de ${Cal().nomeMes(mes)}/${ano}, começando com ${nomeEq}.`,
+        usuarioId: ctx(app).sessao()?.usuarioId,
+      });
       window.DiaconiaHistory.add(state, {
         tipo: "gerar",
         mensagem: `Escala gerada: ${qtdMeses} mês(es) a partir de ${Cal().nomeMes(mes)}/${ano}, começando com ${nomeEq}${res.criadas ? ` (${res.criadas} culto(s) criado(s))` : ""}${res.incompletas ? ` · ${res.incompletas} incompleta(s)` : ""}.`,
@@ -684,6 +715,12 @@ window.DiaconiaViewsLider = (() => {
       );
       esc.descricao = root.querySelector("#f-desc").value;
       state.escalas[data] = esc;
+      window.DiaconiaEscalaArquivo?.guardar?.(state, {
+        motivo: "criar",
+        mensagem: `Escala criada em ${data}: ${esc.nome}.`,
+        usuarioId: ctx(app).sessao()?.usuarioId,
+        escalas: { [data]: esc },
+      });
       window.DiaconiaHistory.add(state, {
         tipo: "criar",
         mensagem: `Escala criada em ${data}: ${esc.nome} (${UI().nomeEquipe(state, eqSel)}).`,
@@ -2681,7 +2718,59 @@ window.DiaconiaViewsLider = (() => {
   }
 
   /* ——— Histórico ——— */
-  function historico(app) {
+  function nomeUsuarioHist(state, id) {
+    if (!id) return "Sistema";
+    const u = (state.usuarios || []).find((x) => x.id === id);
+    return u?.nome || u?.login || "—";
+  }
+
+  function resumoDatasArquivo(datas) {
+    const list = datas || [];
+    if (!list.length) return "—";
+    const fmt = (d) => Cal().formatBR(d);
+    if (list.length === 1) return fmt(list[0]);
+    if (list.length === 2) return `${fmt(list[0])} e ${fmt(list[1])}`;
+    return `${fmt(list[0])} a ${fmt(list[list.length - 1])}`;
+  }
+
+  function historicoArquivoHtml(app) {
+    const { state } = ctx(app);
+    const Arq = window.DiaconiaEscalaArquivo;
+    const lista = Arq?.listar?.(state) || state.escalasArquivo || [];
+    const rows = lista
+      .map((item) => {
+        const info = Arq?.motivoInfo?.(item.motivo) || { texto: item.motivo || "Arquivo", tom: "muted" };
+        const qtd = item.qtd || item.datas?.length || 0;
+        return `<tr class="no-click">
+          ${UI().bulkTd(item.id, "escala-arquivo")}
+          <td>${UI().esc(item.em ? new Date(item.em).toLocaleString("pt-BR") : "—")}</td>
+          <td><span class="badge badge-${info.tom}">${UI().esc(info.texto)}</span></td>
+          <td>${qtd} culto(s)<div class="muted" style="font-size:12px">${UI().esc(resumoDatasArquivo(item.datas))}</div></td>
+          <td>${UI().esc(nomeUsuarioHist(state, item.usuarioId))}</td>
+          <td>
+            <div class="toolbar">
+              ${UI().btnIcon({ icon: "eye", label: "Ver cultos", variant: "ghost", attrs: { "data-act": "arq-ver", "data-id": item.id } })}
+              ${UI().btnIcon({ icon: "book", label: "Gerar PDF", variant: "ghost", attrs: { "data-act": "arq-pdf", "data-id": item.id } })}
+              ${UI().btnIcon({ icon: "refresh", label: "Restaurar", variant: "accent", attrs: { "data-act": "arq-rest", "data-id": item.id } })}
+              ${UI().btnIcon({ icon: "trash", label: "Excluir cópia", variant: "danger", attrs: { "data-act": "arq-del", "data-id": item.id } })}
+            </div>
+          </td>
+        </tr>`;
+      })
+      .join("");
+
+    return `
+      <p class="muted" style="margin:-4px 0 12px">Cópias guardadas ao gerar, criar ou excluir escalas. Se alguém apagar um culto sem querer, restaure daqui ou gere o PDF da versão guardada.</p>
+      <div class="panel">${UI().bulkBar("escala-arquivo", { deleteLabel: "Excluir cópias selecionadas" })}<div class="table-wrap"><table class="data" data-bulk-table="escala-arquivo">
+        <thead><tr>${UI().bulkTh("escala-arquivo")}<th>Quando</th><th>Motivo</th><th>Cultos</th><th>Quem</th><th>Ações</th></tr></thead>
+        <tbody>${
+          rows ||
+          `<tr class="no-click"><td colspan="6" class="empty">Nenhuma cópia ainda. Ao gerar, criar ou excluir escalas, elas aparecem aqui.</td></tr>`
+        }</tbody>
+      </table></div></div>`;
+  }
+
+  function historicoAtividadeHtml(app) {
     const { state } = ctx(app);
     const filtro = app.filtroHistoricoTipo || "";
     const busca = (app.filtroHistoricoBusca || "").toLowerCase().trim();
@@ -2716,15 +2805,6 @@ window.DiaconiaViewsLider = (() => {
       .join("");
 
     return `
-      <div class="topbar">
-        <div>
-          <h1>Histórico</h1>
-          <p class="sub">${lista.length} registro(s) exibidos · ${total} no total. Criações, alterações, trocas e aprovações.</p>
-        </div>
-        <div class="toolbar">
-          <button type="button" class="btn btn-danger" id="btn-clear-hist">Limpar tudo</button>
-        </div>
-      </div>
       <div class="toolbar" style="margin-bottom:14px">
         <label class="field" style="margin:0;min-width:160px">
           <span class="muted" style="font-size:12px">Tipo</span>
@@ -2737,6 +2817,7 @@ window.DiaconiaViewsLider = (() => {
           <span class="muted" style="font-size:12px">Buscar</span>
           <input id="hist-busca" class="input" placeholder="Texto da mensagem…" value="${UI().esc(app.filtroHistoricoBusca || "")}"/>
         </label>
+        <button type="button" class="btn btn-danger" id="btn-clear-hist">Limpar tudo</button>
       </div>
       <div class="panel">${UI().bulkBar("historico")}<div class="table-wrap"><table class="data" data-bulk-table="historico">
         <thead><tr>${UI().bulkTh("historico")}<th>Quando</th><th>Tipo</th><th>Mensagem</th><th>Ações</th></tr></thead>
@@ -2744,8 +2825,162 @@ window.DiaconiaViewsLider = (() => {
       </table></div></div>`;
   }
 
+  function historico(app) {
+    const aba = app.historicoAba === "atividade" ? "atividade" : "arquivo";
+    const nArq = (app.state.escalasArquivo || []).length;
+    const nAtv = (app.state.historico || []).length;
+    const sub =
+      aba === "arquivo"
+        ? `${nArq} cópia(s) de escala para recuperar ou gerar PDF.`
+        : `${nAtv} registro(s) de atividade do sistema.`;
+
+    return `
+      <div class="topbar">
+        <div>
+          <h1>Histórico</h1>
+          <p class="sub">${sub}</p>
+        </div>
+      </div>
+      <div class="hist-tabs" role="tablist">
+        <button type="button" class="view-tab ${aba === "arquivo" ? "active" : ""}" data-hist-aba="arquivo">Arquivo de escalas</button>
+        <button type="button" class="view-tab ${aba === "atividade" ? "active" : ""}" data-hist-aba="atividade">Atividade do sistema</button>
+      </div>
+      ${aba === "arquivo" ? historicoArquivoHtml(app) : historicoAtividadeHtml(app)}`;
+  }
+
+  async function restaurarArquivoEscala(app, id) {
+    const { state } = ctx(app);
+    const Arq = window.DiaconiaEscalaArquivo;
+    if (!Arq?.restaurar) return UI().toast("Arquivo de escalas indisponível.");
+    const tentativa = Arq.restaurar(state, id);
+    if (tentativa?.precisaConfirmar) {
+      const datas = (tentativa.conflito || []).map((d) => Cal().formatBR(d)).join(", ");
+      const ok = await UI().confirmModal({
+        title: "Substituir escala atual?",
+        body: `<p>${UI().esc(tentativa.erro || "Já existe escala nestas datas.")}</p>
+          <p class="muted">Datas com escala hoje: ${UI().esc(datas || "—")}. Uma cópia do que está no calendário também fica no arquivo.</p>`,
+        okText: "Restaurar e substituir",
+        danger: true,
+      });
+      if (!ok) return;
+      const res = Arq.restaurar(state, id, { sobrescrever: true });
+      if (!res?.ok) return UI().toast(res?.erro || "Não foi possível restaurar.");
+      app.save();
+      app.render();
+      UI().toast(`${res.qtd} culto(s) restaurado(s).`);
+      return;
+    }
+    if (!tentativa?.ok) return UI().toast(tentativa?.erro || "Não foi possível restaurar.");
+    app.save();
+    app.render();
+    UI().toast(`${tentativa.qtd} culto(s) restaurado(s).`);
+  }
+
+  function abrirDetalheArquivo(app, id) {
+    const { state } = ctx(app);
+    const Arq = window.DiaconiaEscalaArquivo;
+    const item = Arq?.get?.(state, id);
+    if (!item) return UI().toast("Cópia não encontrada.");
+    const info = Arq.motivoInfo(item.motivo);
+    const linhas = (item.datas || [])
+      .map((data) => {
+        const esc = item.escalas?.[data];
+        const eqId = esc?.equipesIds?.[0];
+        const eqNome = eqId ? UI().nomeEquipe(state, eqId) : "—";
+        const noCal = !!state.escalas?.[data];
+        return `<tr class="no-click">
+          <td>${UI().esc(Cal().formatBR(data))}</td>
+          <td>${UI().esc(esc?.nome || "Culto")}</td>
+          <td>${eqId ? UI().marcaEquipe(state, eqId, eqNome) : UI().esc(eqNome)}</td>
+          <td>${noCal ? `<span class="badge badge-warn">No calendário</span>` : `<span class="badge badge-ok">Ausente</span>`}</td>
+        </tr>`;
+      })
+      .join("");
+
+    UI().openModal(
+      `
+      <h2>Cópia de escala</h2>
+      <p class="muted" style="margin-top:-4px">${UI().esc(item.em ? new Date(item.em).toLocaleString("pt-BR") : "")} ·
+        <span class="badge badge-${info.tom}">${UI().esc(info.texto)}</span> ·
+        ${UI().esc(nomeUsuarioHist(state, item.usuarioId))}</p>
+      <p>${UI().esc(item.mensagem || "")}</p>
+      <div class="table-wrap" style="margin:12px 0">
+        <table class="data">
+          <thead><tr><th>Data</th><th>Evento</th><th>Equipe</th><th>Calendário</th></tr></thead>
+          <tbody>${linhas || `<tr class="no-click"><td colspan="4" class="empty">Vazio.</td></tr>`}</tbody>
+        </table>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" data-act="fechar">Fechar</button>
+        <button type="button" class="btn btn-ghost" data-act="pdf">Gerar PDF</button>
+        <button type="button" class="btn btn-accent" data-act="restaurar">Restaurar</button>
+      </div>
+    `,
+      { wide: true }
+    );
+
+    const root = document.getElementById("modal-root");
+    root.addEventListener("click", async (e) => {
+      const act = e.target.closest("[data-act]")?.dataset.act;
+      if (act === "fechar") return UI().closeModal();
+      if (act === "pdf") {
+        const res = Arq.gerarPdf(state, id);
+        if (!res?.ok) UI().toast(res?.erro || "Não foi possível gerar o PDF.");
+        else UI().toast("PDF aberto para impressão.");
+        return;
+      }
+      if (act === "restaurar") {
+        UI().closeModal();
+        await restaurarArquivoEscala(app, id);
+      }
+    });
+  }
+
   function bindHistorico(app, root) {
     const { state } = ctx(app);
+    root.querySelectorAll("[data-hist-aba]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        app.historicoAba = btn.dataset.histAba;
+        app.render();
+      });
+    });
+
+    root.querySelectorAll('[data-act="arq-ver"]').forEach((btn) => {
+      btn.addEventListener("click", () => abrirDetalheArquivo(app, btn.dataset.id));
+    });
+    root.querySelectorAll('[data-act="arq-pdf"]').forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const res = window.DiaconiaEscalaArquivo?.gerarPdf(state, btn.dataset.id);
+        if (!res?.ok) UI().toast(res?.erro || "Não foi possível gerar o PDF.");
+        else UI().toast("PDF aberto para impressão.");
+      });
+    });
+    root.querySelectorAll('[data-act="arq-rest"]').forEach((btn) => {
+      btn.addEventListener("click", () => restaurarArquivoEscala(app, btn.dataset.id));
+    });
+    root.querySelectorAll('[data-act="arq-del"]').forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const ok = await UI().confirmDelete({
+          itemLabel: "esta cópia do arquivo",
+          detalhes: "Isso não altera a escala do calendário — só remove esta versão guardada.",
+        });
+        if (!ok) return;
+        window.DiaconiaEscalaArquivo.excluirArquivo(state, btn.dataset.id);
+        app.save();
+        app.render();
+        UI().toast("Cópia excluída do arquivo.");
+      });
+    });
+    UI().bindBulkTable(root, "escala-arquivo", {
+      itemLabel: "cópia(s) do arquivo",
+      onDelete: async (ids) => {
+        for (const id of ids) window.DiaconiaEscalaArquivo.excluirArquivo(state, id);
+        app.save();
+        app.render();
+        UI().toast(`${ids.length} cópia(s) excluída(s) do arquivo.`);
+      },
+    });
+
     root.querySelector("#hist-tipo")?.addEventListener("change", (e) => {
       app.filtroHistoricoTipo = e.target.value;
       app.render();
@@ -2779,7 +3014,7 @@ window.DiaconiaViewsLider = (() => {
     root.querySelector("#btn-clear-hist")?.addEventListener("click", async () => {
       const ok = await UI().confirmModal({
         title: "Limpar histórico",
-        body: "<p>Apagar <strong>todos</strong> os registros do histórico?</p>",
+        body: "<p>Apagar <strong>todos</strong> os registros da atividade do sistema? O arquivo de escalas não é apagado.</p>",
         okText: "Limpar tudo",
         danger: true,
       });
@@ -2787,7 +3022,7 @@ window.DiaconiaViewsLider = (() => {
       window.DiaconiaHistory.clear(state);
       app.save();
       app.render();
-      UI().toast("Histórico limpo.");
+      UI().toast("Atividade do sistema limpa.");
     });
 
     UI().bindBulkTable(root, "historico", {
@@ -3239,6 +3474,27 @@ window.DiaconiaViewsLider = (() => {
                 <label class="field"><span><input type="checkbox" id="wa-cadastro" ${wa.notificarCadastroUsuario !== false ? "checked" : ""}/> Enviar login e senha ao criar usuário</span></label>
                 <label class="field"><span><input type="checkbox" id="wa-rest" ${wa.notificarRestricao !== false ? "checked" : ""}/> Avisar líderes quando diácono enviar “Não posso ir”</span></label>
                 <label class="field"><span><input type="checkbox" id="wa-rest-st" ${wa.notificarStatusRestricao !== false ? "checked" : ""}/> Avisar diácono quando líder aprovar ou recusar aviso</span></label>
+                <label class="field"><span><input type="checkbox" id="wa-emergencia" ${wa.notificarEmergenciaSemCobertura !== false ? "checked" : ""}/> Avisar líderes quando diácono tocar “Estou ciente, mas não consigo agora”</span></label>
+                <p class="muted settings-hint">Mensagem de emergência: o diácono não pediu cobertura e precisa de atenção da liderança.</p>
+                <p class="settings-label">Quem recebe o aviso de emergência:</p>
+                <div class="check-list" id="wa-lideres-emergencia">
+                  ${
+                    lideresAtivos(state).length
+                      ? lideresAtivos(state)
+                          .map((l) => {
+                            const ids = wa.lideresRecebemEmergenciaIds;
+                            const todos = ids == null;
+                            const checked =
+                              todos ||
+                              (Array.isArray(ids) && ids.includes(l.id));
+                            const waOk = window.DiaconiaWhatsApp?.numeroDeLider?.(state, l)?.ok;
+                            return `<label><input type="checkbox" name="wa-lider-emerg" value="${UI().esc(l.id)}" ${checked ? "checked" : ""}/> ${UI().esc(l.nome || "Líder")}${waOk ? "" : ` <span class="muted">(sem WhatsApp)</span>`}</label>`;
+                          })
+                          .join("")
+                      : `<p class="muted" style="margin:0">Cadastre líderes na aba <strong>Líderes</strong>.</p>`
+                  }
+                </div>
+                <p class="muted settings-hint">Marque quem deve ser avisado. Se nenhum estiver marcado, ninguém recebe.</p>
                 <label class="field"><span><input type="checkbox" id="wa-direto" ${wa.abrirDireto ? "checked" : ""}/> No celular, abrir conversa direto no app</span></label>
                 <p class="muted settings-hint">No computador o sistema pergunta: app instalado ou WhatsApp Web.</p>
                 <label class="field"><span>Modo de envio</span>
@@ -3535,6 +3791,9 @@ window.DiaconiaViewsLider = (() => {
 
     root.querySelector("#btn-save-wa")?.addEventListener("click", () => {
       window.DiaconiaWhatsApp?.ensure?.(state);
+      const lideresEmerg = [...root.querySelectorAll('input[name="wa-lider-emerg"]:checked')].map(
+        (i) => i.value
+      );
       state.configuracoes.whatsapp = {
         ...window.DiaconiaWhatsApp.cfgPadrao(),
         ...(state.configuracoes.whatsapp || {}),
@@ -3544,6 +3803,8 @@ window.DiaconiaViewsLider = (() => {
         notificarCadastroUsuario: root.querySelector("#wa-cadastro")?.checked !== false,
         notificarRestricao: root.querySelector("#wa-rest")?.checked !== false,
         notificarStatusRestricao: root.querySelector("#wa-rest-st")?.checked !== false,
+        notificarEmergenciaSemCobertura: root.querySelector("#wa-emergencia")?.checked !== false,
+        lideresRecebemEmergenciaIds: lideresEmerg,
         abrirDireto: root.querySelector("#wa-direto")?.checked !== false,
         abrirNoNavegador: false,
         modo: root.querySelector("#wa-modo")?.value === "api" ? "api" : "manual",

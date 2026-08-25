@@ -246,19 +246,16 @@ window.DiaconiaEscalaModal = (() => {
       if (act === "excluir-dia" && isLider) {
         const ok = await UI().confirmDelete({
           itemLabel: `a escala de <strong>${UI().esc(Cal().formatBR(data))}</strong>`,
-          detalhes: "As atribuições deste dia serão removidas. Restrições pessoais da data permanecem.",
+          detalhes: "As atribuições deste dia serão removidas. Uma cópia fica em Histórico → Arquivo de escalas para recuperar ou gerar PDF.",
         });
         if (!ok) return;
-        const res = Engine().excluirEscalaDia(state, data);
-        if (!res.ok) return UI().toast(res.erro);
-        window.DiaconiaHistory.add(state, {
-          tipo: "escala",
-          mensagem: `Escala excluída: ${data}.`,
-          usuarioId: window.DiaconiaAuth.sessao()?.usuarioId,
-        });
+        const res = window.DiaconiaEscalaArquivo?.excluirDias
+          ? window.DiaconiaEscalaArquivo.excluirDias(state, [data], window.DiaconiaAuth.sessao())
+          : Engine().excluirEscalaDia(state, data);
+        if (!res.ok) return UI().toast(res.erro || "Não foi possível excluir.");
         UI().closeModal();
         onChange?.();
-        UI().toast("Escala excluída.");
+        UI().toast("Escala excluída. Cópia guardada em Histórico → Arquivo de escalas.");
         return;
       }
       if (act === "shuffle-eq" && isLider) {
