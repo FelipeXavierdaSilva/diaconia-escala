@@ -1443,10 +1443,96 @@ window.DiaconiaViewsDiacono = (() => {
     });
   }
 
+  /* ——— Relatar erro ——— */
+  function relatar(app) {
+    const { state } = app;
+    const sessao = window.DiaconiaAuth.sessao();
+    const Err = window.DiaconiaErrors;
+    Err?.ensure?.(state);
+    const meus = (state.relatosErro || [])
+      .filter((r) => r.criadoPor === sessao?.usuarioId)
+      .sort((a, b) => String(b.criadoEm).localeCompare(String(a.criadoEm)));
+
+    const areas = (Err?.AREAS || []).map(
+      (a) => `<option value="${a.id}">${UI().esc(a.label)}</option>`
+    ).join("");
+
+    const rows = meus
+      .map((r) => {
+        const st = Err.statusInfo(r.status);
+        return `<tr class="no-click">
+          <td>${UI().esc(r.criadoEm ? new Date(r.criadoEm).toLocaleString("pt-BR") : "—")}</td>
+          <td><strong>${UI().esc(r.titulo)}</strong>
+            <div class="muted" style="font-size:12px">${UI().esc(Err.areaLabel(r.area))}</div>
+          </td>
+          <td><span class="badge badge-${st.tom}">${UI().esc(st.texto)}</span></td>
+          <td class="muted" style="font-size:13px;max-width:280px">${UI().esc((r.descricao || "").slice(0, 120))}${(r.descricao || "").length > 120 ? "…" : ""}</td>
+        </tr>`;
+      })
+      .join("");
+
+    return `
+      <div class="topbar">
+        <div>
+          <h1>Relatar erro</h1>
+          <p class="sub">Algo não funcionou? Conte para a liderança — isso ajuda a melhorar o sistema.</p>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-bottom:16px">
+        <h2 style="margin-top:0">Novo relato</h2>
+        <label class="field"><span>Onde ocorreu?</span>
+          <select id="err-area" class="select">${areas}</select>
+        </label>
+        <label class="field"><span>Título curto</span>
+          <input id="err-titulo" class="input" maxlength="120" placeholder="Ex.: Não consegui salvar a viagem"/>
+        </label>
+        <label class="field"><span>O que aconteceu?</span>
+          <textarea id="err-desc" class="textarea" rows="5" placeholder="Descreva o que você tentou fazer, o que esperava e o que apareceu (mensagem de erro, tela em branco, etc.)."></textarea>
+        </label>
+        <div class="toolbar">
+          <button type="button" class="btn btn-accent" id="btn-enviar-erro">Enviar relato</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>Meus relatos</h2></div>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Quando</th><th>Problema</th><th>Status</th><th>Detalhe</th></tr></thead>
+            <tbody>${rows || `<tr class="no-click"><td colspan="4" class="empty">Você ainda não enviou relatos.</td></tr>`}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+
+  function bindRelatar(app, root) {
+    root.querySelector("#btn-enviar-erro")?.addEventListener("click", () => {
+      const { state } = app;
+      const sessao = window.DiaconiaAuth.sessao();
+      if (!window.DiaconiaErrors) return UI().toast("Serviço de relatos indisponível.");
+      const res = window.DiaconiaErrors.criar(
+        state,
+        {
+          area: root.querySelector("#err-area")?.value || "outro",
+          titulo: root.querySelector("#err-titulo")?.value || "",
+          descricao: root.querySelector("#err-desc")?.value || "",
+          pagina: app.page || "relatar",
+        },
+        sessao
+      );
+      if (!res.ok) return UI().toast(res.erro);
+      app.save();
+      app.render();
+      UI().toast("Relato enviado. A liderança foi notificada.");
+    });
+  }
+
   const pages = {
     minha: { render: minhaEscala, bind: bindMinhaEscala },
     avisos: { render: avisos, bind: bindAvisos },
     conta: { render: conta, bind: bindConta },
+    relatar: { render: relatar, bind: bindRelatar },
   };
 
   return { pages };

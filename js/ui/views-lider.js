@@ -3564,6 +3564,222 @@ window.DiaconiaViewsLider = (() => {
     });
   }
 
+  /* ——— Relatos de erro (admin) ——— */
+  function errosAdmin(app) {
+    const { state } = ctx(app);
+    const Err = window.DiaconiaErrors;
+    Err?.ensure?.(state);
+    const filtro = app.filtroErroStatus || "";
+    let lista = [...(state.relatosErro || [])].sort((a, b) =>
+      String(b.criadoEm || "").localeCompare(String(a.criadoEm || ""))
+    );
+    if (filtro) lista = lista.filter((r) => r.status === filtro);
+    const s = Err?.resumo?.(state) || { total: 0, abertos: 0, porStatus: {}, porArea: {} };
+
+    const rows = lista
+      .map((r) => {
+        const st = Err.statusInfo(r.status);
+        return `<tr class="no-click" data-id="${r.id}">
+          <td>${UI().esc(r.criadoEm ? new Date(r.criadoEm).toLocaleString("pt-BR") : "—")}</td>
+          <td><strong>${UI().esc(r.criadoPorNome || "—")}</strong>
+            <div class="muted" style="font-size:12px">${UI().esc(r.criadoPorPapel || "")}</div>
+          </td>
+          <td><strong>${UI().esc(r.titulo)}</strong>
+            <div class="muted" style="font-size:12px">${UI().esc(Err.areaLabel(r.area))}</div>
+          </td>
+          <td><span class="badge badge-${st.tom}">${UI().esc(st.texto)}</span></td>
+          <td class="toolbar">
+            ${UI().btnIcon({ icon: "eye", label: "Abrir", variant: "ghost", attrs: { "data-act": "ver-err", "data-id": r.id } })}
+            ${UI().btnIcon({ icon: "trash", label: "Excluir", variant: "danger", attrs: { "data-act": "del-err", "data-id": r.id } })}
+          </td>
+        </tr>`;
+      })
+      .join("");
+
+    return `
+      <div class="topbar">
+        <div>
+          <h1>Relatos de erro</h1>
+          <p class="sub">Problemas enviados pelos usuários — use para aperfeiçoar o sistema.</p>
+        </div>
+        <div class="toolbar">
+          <button type="button" class="btn btn-ghost" id="btn-novo-relato-lider">+ Relatar erro</button>
+          <button type="button" class="btn btn-ghost" id="btn-relatorio-txt">Baixar relatório (.txt)</button>
+          <button type="button" class="btn btn-accent" id="btn-relatorio-print">Imprimir relatório</button>
+        </div>
+      </div>
+
+      <div class="grid grid-3" style="margin-bottom:16px">
+        <div class="panel" style="padding:14px"><div class="muted" style="font-size:12px">Total</div><strong style="font-size:22px">${s.total}</strong></div>
+        <div class="panel" style="padding:14px"><div class="muted" style="font-size:12px">Abertos / em análise</div><strong style="font-size:22px;color:var(--warn)">${s.abertos}</strong></div>
+        <div class="panel" style="padding:14px"><div class="muted" style="font-size:12px">Resolvidos</div><strong style="font-size:22px">${s.porStatus?.resolvido || 0}</strong></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Lista</h2>
+          <label class="field" style="margin:0;min-width:160px"><span class="muted" style="font-size:12px">Status</span>
+            <select id="filtro-err-st" class="select">
+              <option value="">Todos</option>
+              <option value="aberto" ${filtro === "aberto" ? "selected" : ""}>Aberto</option>
+              <option value="em_analise" ${filtro === "em_analise" ? "selected" : ""}>Em análise</option>
+              <option value="resolvido" ${filtro === "resolvido" ? "selected" : ""}>Resolvido</option>
+              <option value="descartado" ${filtro === "descartado" ? "selected" : ""}>Descartado</option>
+            </select>
+          </label>
+        </div>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Quando</th><th>Quem</th><th>Problema</th><th>Status</th><th></th></tr></thead>
+            <tbody>${rows || `<tr class="no-click"><td colspan="5" class="empty">Nenhum relato ainda.</td></tr>`}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+
+  function bindErrosAdmin(app, root) {
+    const { state } = ctx(app);
+    const sessao = ctx(app).sessao();
+
+    root.querySelector("#filtro-err-st")?.addEventListener("change", (e) => {
+      app.filtroErroStatus = e.target.value || "";
+      app.render();
+    });
+
+    root.querySelector("#btn-relatorio-txt")?.addEventListener("click", () => {
+      const res = window.DiaconiaErrors?.baixarRelatorio?.(state);
+      if (!res?.ok) return UI().toast(res?.erro || "Não foi possível baixar.");
+      UI().toast("Relatório baixado.");
+    });
+
+    root.querySelector("#btn-relatorio-print")?.addEventListener("click", () => {
+      const res = window.DiaconiaErrors?.imprimirRelatorio?.(state);
+      if (!res?.ok) return UI().toast(res?.erro || "Não foi possível imprimir.");
+    });
+
+    root.querySelector("#btn-novo-relato-lider")?.addEventListener("click", () => {
+      formRelatoLider(app);
+    });
+
+    root.querySelectorAll('[data-act="del-err"]').forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const r = (state.relatosErro || []).find((x) => x.id === btn.dataset.id);
+        if (!r) return;
+        const ok = await UI().confirmDelete({
+          itemLabel: `o relato <strong>${UI().esc(r.titulo)}</strong>`,
+        });
+        if (!ok) return;
+        const res = window.DiaconiaErrors.excluir(state, r.id, sessao);
+        if (!res.ok) return UI().toast(res.erro);
+        app.save();
+        app.render();
+        UI().toast("Relato excluído.");
+      });
+    });
+
+    root.querySelectorAll('[data-act="ver-err"]').forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const r = (state.relatosErro || []).find((x) => x.id === btn.dataset.id);
+        if (!r) return;
+        abrirDetalheRelato(app, r);
+      });
+    });
+  }
+
+  function formRelatoLider(app) {
+    const { state } = ctx(app);
+    const Err = window.DiaconiaErrors;
+    const areas = (Err?.AREAS || [])
+      .map((a) => `<option value="${a.id}">${UI().esc(a.label)}</option>`)
+      .join("");
+    UI().openModal(`
+      <h2>Relatar erro</h2>
+      <p class="muted" style="margin-top:0">Registre um problema encontrado na gestão ou no uso do sistema.</p>
+      <label class="field"><span>Onde ocorreu?</span><select id="err-area" class="select">${areas}</select></label>
+      <label class="field"><span>Título</span><input id="err-titulo" class="input" maxlength="120"/></label>
+      <label class="field"><span>Descrição</span><textarea id="err-desc" class="textarea" rows="5"></textarea></label>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" data-act="cancel">Cancelar</button>
+        <button type="button" class="btn btn-accent" data-act="save">Enviar</button>
+      </div>
+    `);
+    const m = document.getElementById("modal-root");
+    m.addEventListener("click", (e) => {
+      const act = e.target.closest("[data-act]")?.dataset.act;
+      if (act === "cancel") return UI().closeModal();
+      if (act !== "save") return;
+      const res = Err.criar(
+        state,
+        {
+          area: m.querySelector("#err-area")?.value,
+          titulo: m.querySelector("#err-titulo")?.value,
+          descricao: m.querySelector("#err-desc")?.value,
+          pagina: "erros",
+        },
+        ctx(app).sessao()
+      );
+      if (!res.ok) return UI().toast(res.erro);
+      UI().closeModal();
+      app.save();
+      app.render();
+      UI().toast("Relato registrado.");
+    });
+  }
+
+  function abrirDetalheRelato(app, relato) {
+    const { state } = ctx(app);
+    const Err = window.DiaconiaErrors;
+    const st = Err.statusInfo(relato.status);
+    UI().openModal(`
+      <h2>${UI().esc(relato.titulo)}</h2>
+      <p class="muted" style="margin-top:0">
+        ${UI().esc(relato.criadoPorNome || "—")} · ${UI().esc(Err.areaLabel(relato.area))} ·
+        <span class="badge badge-${st.tom}">${UI().esc(st.texto)}</span>
+      </p>
+      <p style="white-space:pre-wrap">${UI().esc(relato.descricao)}</p>
+      ${
+        relato.tecnico
+          ? `<p class="muted" style="font-size:12px"><strong>Técnico:</strong> ${UI().esc(relato.tecnico)}</p>`
+          : ""
+      }
+      <label class="field"><span>Status</span>
+        <select id="err-st" class="select">
+          <option value="aberto" ${relato.status === "aberto" ? "selected" : ""}>Aberto</option>
+          <option value="em_analise" ${relato.status === "em_analise" ? "selected" : ""}>Em análise</option>
+          <option value="resolvido" ${relato.status === "resolvido" ? "selected" : ""}>Resolvido</option>
+          <option value="descartado" ${relato.status === "descartado" ? "selected" : ""}>Descartado</option>
+        </select>
+      </label>
+      <label class="field"><span>Nota da liderança (opcional)</span>
+        <textarea id="err-nota" class="textarea" rows="3">${UI().esc(relato.notaAdmin || "")}</textarea>
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" data-act="cancel">Fechar</button>
+        <button type="button" class="btn btn-accent" data-act="save">Salvar</button>
+      </div>
+    `);
+    const m = document.getElementById("modal-root");
+    m.addEventListener("click", (e) => {
+      const act = e.target.closest("[data-act]")?.dataset.act;
+      if (act === "cancel") return UI().closeModal();
+      if (act !== "save") return;
+      const res = Err.atualizarStatus(
+        state,
+        relato.id,
+        {
+          status: m.querySelector("#err-st")?.value || "aberto",
+          notaAdmin: m.querySelector("#err-nota")?.value || "",
+        },
+        ctx(app).sessao()
+      );
+      if (!res.ok) return UI().toast(res.erro);
+      UI().closeModal();
+      app.save();
+      app.render();
+      UI().toast("Relato atualizado.");
+    });
+  }
+
   const pages = {
     escalas: { render: escalas, bind: bindEscalas },
     diaconos: { render: diaconos, bind: bindDiaconos },
@@ -3575,8 +3791,10 @@ window.DiaconiaViewsLider = (() => {
     comunicados: { render: comunicados, bind: bindComunicados },
     usuarios: { render: usuarios, bind: bindUsuarios },
     historico: { render: historico, bind: bindHistorico },
+    erros: { render: errosAdmin, bind: bindErrosAdmin },
     configuracoes: { render: configuracoes, bind: bindConfiguracoes },
   };
 
   return { pages };
 })();
+

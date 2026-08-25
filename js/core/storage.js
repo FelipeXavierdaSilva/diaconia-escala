@@ -340,6 +340,8 @@ window.DiaconiaStorage = (() => {
     // Canal WhatsApp (manual hoje → API no futuro)
     if (!Array.isArray(state.whatsappFila)) state.whatsappFila = [];
     if (!Array.isArray(state.whatsappLog)) state.whatsappLog = [];
+    if (!Array.isArray(state.relatosErro)) state.relatosErro = [];
+    if (!Array.isArray(state.comunicados)) state.comunicados = [];
     if (typeof window.DiaconiaWhatsApp?.ensure === "function") {
       window.DiaconiaWhatsApp.ensure(state);
     } else if (!state.configuracoes.whatsapp) {

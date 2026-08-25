@@ -5,7 +5,7 @@
 window.DiaconiaApp = (() => {
   const UI = window.DiaconiaUI;
 
-  const PAGINAS_SERVICO = new Set(["minha", "avisos", "conta"]);
+  const PAGINAS_SERVICO = new Set(["minha", "avisos", "conta", "relatar"]);
 
   const app = {
     state: null,
@@ -91,6 +91,15 @@ window.DiaconiaApp = (() => {
         if (podeAvisos && (ir === "avisos" || ir === "trocas")) {
           this.page = "avisos";
         }
+        if (ir === "erros" && sessao.papel === "lider") {
+          this.page = "erros";
+        }
+        if (
+          ir === "relatar" &&
+          (sessao.papel === "diacono" || (sessao.papel === "lider" && sessao.diaconoId))
+        ) {
+          this.page = "relatar";
+        }
         params.delete("ir");
         const q = params.toString();
         const clean = `${window.location.pathname}${q ? `?${q}` : ""}${window.location.hash || ""}`;
@@ -169,6 +178,7 @@ window.DiaconiaApp = (() => {
         { id: "trocas", label: "Troca / Cobrir" },
         { id: "comunicados", label: "Comunicados" },
         { sep: true, label: "Sistema" },
+        { id: "erros", label: "Relatos de erro" },
         { id: "historico", label: "Histórico" },
         { id: "configuracoes", label: "Configurações" },
       ];
@@ -179,6 +189,7 @@ window.DiaconiaApp = (() => {
         { id: "minha", label: "Minha escala" },
         { id: "avisos", label: "Avisos" },
         { id: "conta", label: "Minha conta" },
+        { id: "relatar", label: "Relatar erro" },
       ];
     },
 
@@ -189,6 +200,7 @@ window.DiaconiaApp = (() => {
         { id: "minha", label: "Minha escala" },
         { id: "avisos", label: "Meus avisos" },
         { id: "conta", label: "Minha conta" },
+        { id: "relatar", label: "Relatar erro" },
         { sep: true, label: "Gestão" },
         ...this.navLiderBase(),
       ];
@@ -243,6 +255,9 @@ window.DiaconiaApp = (() => {
 
       const pendGestao = isLider ? this.restricoesPendentes() : 0;
       const pendServico = !isLider || naEscala ? this.avisosPendentes() : 0;
+      const errosAbertos = isLider
+        ? window.DiaconiaErrors?.abertos?.(this.state)?.length || 0
+        : 0;
 
       const navHtml = nav
         .map((item) => {
@@ -252,6 +267,7 @@ window.DiaconiaApp = (() => {
           let label = item.label;
           if (item.id === "restricoes" && pendGestao) label += ` (${pendGestao})`;
           if (item.id === "avisos" && pendServico) label += ` (${pendServico})`;
+          if (item.id === "erros" && errosAbertos) label += ` (${errosAbertos})`;
           return `<button class="nav-btn ${this.page === item.id ? "active" : ""}" data-page="${item.id}">${label}</button>`;
         })
         .join("");
