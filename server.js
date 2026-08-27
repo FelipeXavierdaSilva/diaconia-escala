@@ -61,6 +61,16 @@ function mergeStates(local, remote) {
   const remoteTs = remote.meta?.atualizadoEm || "";
   const base = remoteTs > localTs ? { ...local, ...remote } : { ...remote, ...local };
   base.usuarios = mergeUsuarioLists(local.usuarios, remote.usuarios);
+  {
+    const byId = new Map();
+    for (const item of [...(remote.backupsHistorico || []), ...(local.backupsHistorico || [])]) {
+      if (!item?.id || byId.has(item.id)) continue;
+      byId.set(item.id, item);
+    }
+    base.backupsHistorico = [...byId.values()]
+      .sort((a, b) => String(b.em || "").localeCompare(String(a.em || "")))
+      .slice(0, 15);
+  }
   base.meta = {
     ...(base.meta || {}),
     atualizadoEm: localTs >= remoteTs ? localTs || remoteTs : remoteTs,

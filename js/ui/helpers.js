@@ -472,34 +472,193 @@ window.DiaconiaUI = (() => {
 
   function labelMinisterioDiacono(state, d) {
     if (!d) return "";
-    const nome = nomeMinisterio(state, d.ministerioId);
-    if (nome) return nome.replace(/\s*\([^)]*\)\s*$/, "").trim() || nome;
-    return (d.funcaoMinisterio || "").trim();
+    const Eng = window.DiaconiaEngine;
+    const list = Eng?.normalizeMinisteriosServico?.(d) || [];
+    if (!list.length) return (d.funcaoMinisterio || "").trim();
+    const partes = list.map((item) => {
+      const nome = nomeMinisterio(state, item.ministerioId);
+      const curto = nome ? nome.replace(/\s*\([^)]*\)\s*$/, "").trim() || nome : "";
+      return [curto, item.funcaoMinisterio || ""].filter(Boolean).join(" · ");
+    });
+    return partes.filter(Boolean).join("; ");
   }
 
-  /** Normaliza filhos: [{ nome, idade }] a partir do cadastro (inclui legado filhosNomes). */
+  function ministerioSelectOptions(listaMin, selectedId, diacono) {
+    const Eng = window.DiaconiaEngine;
+    const vinculos = Eng?.normalizeMinisteriosServico?.(diacono) || [];
+    const idsVinculados = new Set(vinculos.map((x) => x.ministerioId).filter(Boolean));
+    return [
+      `<option value="">— Nenhum / só diaconia —</option>`,
+      ...listaMin
+        .filter((m) => m.ativo !== false || idsVinculados.has(m.id))
+        .map((m) => {
+          const faixa =
+            m.horarioInicio && m.horarioFim ? ` (${m.horarioInicio}–${m.horarioFim})` : "";
+          return `<option value="${esc(m.id)}" ${selectedId === m.id ? "selected" : ""}>${esc(m.nome)}${esc(faixa)}${m.ativo === false ? " (inativo)" : ""}</option>`;
+        }),
+    ].join("");
+  }
+
+  function ministerioExtraRowHtml(prefix, idx, item, listaMin, diacono) {
+    return `<div class="ministerio-row ministerio-row-extra" data-min-idx="${idx}">
+      <label class="field"><span>${idx + 1}º ministério</span>
+        <select class="select min-id" data-idx="${idx}">${ministerioSelectOptions(listaMin, item.ministerioId || "", diacono)}</select>
+      </label>
+      <label class="field"><span>Papel / observação (opcional)</span>
+        <input class="input min-obs" data-idx="${idx}" value="${esc(item.funcaoMinisterio || "")}" placeholder="Ex.: professor, backvocal…"/>
+      </label>
+      <button type="button" class="btn btn-ghost btn-sm min-rem" data-idx="${idx}">Remover</button>
+    </div>`;
+  }
+
+  function ministeriosFormHtml(prefix, diacono, listaMin) {
+    const Eng = window.DiaconiaEngine;
+    const list = Eng?.normalizeMinisteriosServico?.(diacono) || [];
+    const first = list[0] || { ministerioId: "", funcaoMinisterio: "" };
+    const extras = list.slice(1);
+    const multi = extras.length > 0;
+    const minOpts = ministerioSelectOptions(listaMin, first.ministerioId || "", diacono);
+
+    return `
+      <label class="field"><span>Ministério (outro serviço)</span>
+        <select id="${prefix}-ministerio-id" class="select">${minOpts}</select>
+      </label>
+      <label class="field"><span>Papel / observação no ministério (opcional)</span>
+        <input id="${prefix}-ministerio" class="input" value="${esc(first.funcaoMinisterio || "")}" placeholder="Ex.: professor, backvocal…"/>
+      </label>
+      <p class="muted" style="font-size:12px;margin:-6px 0 8px">Se servir em outro ministério no culto, o gerador evita funções da diaconia no mesmo horário (pode servir antes ou depois).</p>
+      <label class="field check-inline"><span><input type="checkbox" id="${prefix}-multi-ministerio" ${multi ? "checked" : ""}/> Sirvo em mais de um ministério</span></label>
+      <div id="wrap-${prefix}-ministerios-extra" class="ministerios-extra-block" ${multi ? "" : "hidden"}>
+        <div id="${prefix}-ministerios-extra-list" class="ministerios-extra-list">${
+          extras.map((item, i) => ministerioExtraRowHtml(prefix, i + 1, item, listaMin, diacono)).join("")
+        }</div>
+        <button type="button" class="btn btn-ghost btn-sm" id="${prefix}-add-ministerio">+ adicionar outro ministério</button>
+      </div>`;
+  }
+
+  function bindMinisteriosForm(root, prefix, listaMin = [], diacono = null) {
+    const wrap = root.querySelector(`#wrap-${prefix}-ministerios-extra`);
+    const list = root.querySelector(`#${prefix}-ministerios-extra-list`);
+    const multiCb = root.querySelector(`#${prefix}-multi-ministerio`);
+    const MAX = 6;
+    const diaconoRef = { current: diacono };
+
+    const ensureExtraRow = () => {
+      if (!list || list.querySelector(".ministerio-row-extra")) return;
+      list.insertAdjacentHTML("beforeend", ministerioExtraRowHtml(prefix, 1, {}, listaMin, diaconoRef.current));
+    };
+
+    const sync = () => {
+      const multi = !!multiCb?.checked;
+      if (wrap) wrap.hidden = !multi;
+      if (multi) ensureExtraRow();
+    };
+
+    multiCb?.addEventListener("change", sync);
+
+    root.querySelector(`#${prefix}-add-ministerio`)?.addEventListener("click", () => {
+      if (!list) return;
+      const n = list.querySelectorAll(".ministerio-row-extra").length;
+      if (n >= MAX - 1) return toast("Limite de 6 ministérios.");
+      list.insertAdjacentHTML(
+        "beforeend",
+        ministerioExtraRowHtml(prefix, n + 1, {}, listaMin, diaconoRef.current)
+      );
+    });
+
+    list?.addEventListener("click", (ev) => {
+      const btn = ev.target.closest(".min-rem");
+      if (!btn || !list) return;
+      const rows = list.querySelectorAll(".ministerio-row-extra");
+      if (rows.length <= 1) {
+        toast("Mantenha pelo menos um ministério extra ou desmarque a opção.");
+        return;
+      }
+      btn.closest(".ministerio-row-extra")?.remove();
+      [...list.querySelectorAll(".ministerio-row-extra")].forEach((row, i) => {
+        row.dataset.minIdx = String(i + 1);
+        const label = row.querySelector(".field span");
+        if (label) label.textContent = `${i + 2}º ministério`;
+      });
+    });
+
+    sync();
+    return {
+      sync,
+      ler: () => lerMinisteriosForm(root, prefix),
+    };
+  }
+
+  function lerMinisteriosForm(root, prefix) {
+    const multiMinisterio = !!root.querySelector(`#${prefix}-multi-ministerio`)?.checked;
+    const items = [
+      {
+        ministerioId: root.querySelector(`#${prefix}-ministerio-id`)?.value || "",
+        funcaoMinisterio: root.querySelector(`#${prefix}-ministerio`)?.value.trim() || "",
+      },
+    ];
+    if (multiMinisterio) {
+      for (const row of root.querySelectorAll(`#${prefix}-ministerios-extra-list .ministerio-row-extra`)) {
+        items.push({
+          ministerioId: row.querySelector(".min-id")?.value || "",
+          funcaoMinisterio: row.querySelector(".min-obs")?.value.trim() || "",
+        });
+      }
+    }
+    const servico = items.filter((x) => x.ministerioId);
+    return {
+      multiMinisterio,
+      ministeriosServico: servico,
+      ministerioId: servico[0]?.ministerioId || "",
+      funcaoMinisterio: servico[0]?.funcaoMinisterio || "",
+    };
+  }
+
+  function validarMinisteriosForm(data) {
+    const list = data.ministeriosServico || [];
+    const ids = list.map((x) => x.ministerioId).filter(Boolean);
+    if (data.multiMinisterio && ids.length < 2) {
+      return "Com mais de um ministério, selecione pelo menos dois na lista.";
+    }
+    const seen = new Set();
+    for (const id of ids) {
+      if (seen.has(id)) return "Selecione ministérios diferentes em cada linha.";
+      seen.add(id);
+    }
+    return null;
+  }
+
+  /** Normaliza filhos: [{ nome, dataNascimento, idade }] a partir do cadastro. */
   function normalizeFilhos(diacono) {
+    const Aniv = window.DiaconiaAniversarios;
     if (Array.isArray(diacono?.filhos) && diacono.filhos.length) {
-      return diacono.filhos.map((f) => ({
-        nome: String(f?.nome ?? "").trim(),
-        idade: f?.idade === "" || f?.idade == null || Number.isNaN(Number(f.idade)) ? null : Number(f.idade),
-      }));
+      return diacono.filhos.map((f) => {
+        const nome = String(f?.nome ?? "").trim();
+        const dataNascimento = Aniv?.normalizarDataNascimento?.(f?.dataNascimento) || "";
+        let idade =
+          f?.idade === "" || f?.idade == null || Number.isNaN(Number(f.idade)) ? null : Number(f.idade);
+        if (dataNascimento && Aniv?.idadeDe) {
+          const calc = Aniv.idadeDe(dataNascimento);
+          if (calc != null) idade = calc;
+        }
+        return { nome, dataNascimento, idade };
+      });
     }
     return (diacono?.filhosNomes || [])
       .map((n) => String(n || "").trim())
       .filter(Boolean)
-      .map((nome) => ({ nome, idade: null }));
+      .map((nome) => ({ nome, dataNascimento: "", idade: null }));
   }
 
-  function filhoRowHtml(idx, filho = { nome: "", idade: null }) {
-    const idadeVal = filho.idade != null ? String(filho.idade) : "";
+  function filhoRowHtml(idx, filho = { nome: "", dataNascimento: "" }) {
+    const nascVal = filho.dataNascimento || "";
     const ord = idx + 1;
     return `<div class="filho-row" data-filho-idx="${idx}">
       <label class="field"><span>${ord === 1 ? "Nome do filho(a)" : `${ord}º filho(a) — nome`}</span>
         <input class="input filho-nome" data-idx="${idx}" value="${esc(filho.nome || "")}" placeholder="Nome"/>
       </label>
-      <label class="field"><span>Idade</span>
-        <input class="input filho-idade" data-idx="${idx}" type="number" min="0" max="120" inputmode="numeric" value="${esc(idadeVal)}" placeholder="Anos"/>
+      <label class="field"><span>Data de nascimento</span>
+        <input class="input filho-nasc" data-idx="${idx}" type="date" value="${esc(nascVal)}"/>
       </label>
     </div>`;
   }
@@ -512,7 +671,7 @@ window.DiaconiaUI = (() => {
     const filhos = normalizeFilhos(diacono);
     const tem = !!(diacono?.temFilhos ?? filhos.length > 0);
     const vaiIgreja = !!(diacono?.filhosVaoIgreja);
-    const iniciais = tem ? (filhos.length ? filhos : [{ nome: "", idade: null }]) : [];
+    const iniciais = tem ? (filhos.length ? filhos : [{ nome: "", dataNascimento: "" }]) : [];
     const rows = iniciais.map((f, i) => filhoRowHtml(i, f)).join("");
 
     return `
@@ -530,9 +689,9 @@ window.DiaconiaUI = (() => {
     [...list.querySelectorAll(".filho-row")].forEach((row, i) => {
       row.dataset.filhoIdx = String(i);
       const nomeInput = row.querySelector(".filho-nome");
-      const idadeInput = row.querySelector(".filho-idade");
+      const nascInput = row.querySelector(".filho-nasc");
       if (nomeInput) nomeInput.dataset.idx = String(i);
-      if (idadeInput) idadeInput.dataset.idx = String(i);
+      if (nascInput) nascInput.dataset.idx = String(i);
       const label = row.querySelector(".field span");
       if (label) label.textContent = i === 0 ? "Nome do filho(a)" : `${i + 1}º filho(a) — nome`;
     });
@@ -573,12 +732,12 @@ window.DiaconiaUI = (() => {
     }
     const filhos = [...root.querySelectorAll(`#${prefix}-filhos-list .filho-row`)].map((row) => {
       const nome = row.querySelector(".filho-nome")?.value.trim() || "";
-      const idadeRaw = row.querySelector(".filho-idade")?.value;
-      const idadeNum = idadeRaw === "" || idadeRaw == null ? null : Number(idadeRaw);
-      return {
-        nome,
-        idade: Number.isFinite(idadeNum) ? idadeNum : null,
-      };
+      const dataNascimento =
+        window.DiaconiaAniversarios?.normalizarDataNascimento?.(
+          row.querySelector(".filho-nasc")?.value
+        ) || "";
+      const idade = dataNascimento ? window.DiaconiaAniversarios?.idadeDe?.(dataNascimento) : null;
+      return { nome, dataNascimento, idade: idade != null ? idade : null };
     });
     return {
       temFilhos: true,
@@ -591,12 +750,12 @@ window.DiaconiaUI = (() => {
 
   function validarFilhosForm(data) {
     if (!data?.temFilhos) return null;
-    if (!data.filhos.length) return "Informe o nome e a idade do filho(a).";
+    if (!data.filhos.length) return "Informe o nome e a data de nascimento do filho(a).";
     for (let i = 0; i < data.filhos.length; i++) {
       const f = data.filhos[i];
       const ord = i + 1;
       if (!f?.nome) return `Informe o nome do ${ord}º filho(a).`;
-      if (f.idade == null || f.idade < 0) return `Informe a idade do ${ord}º filho(a).`;
+      if (!f.dataNascimento) return `Informe a data de nascimento do ${ord}º filho(a).`;
     }
     return null;
   }
@@ -613,8 +772,13 @@ window.DiaconiaUI = (() => {
     const filhos = normalizeFilhos(diacono);
     if (!filhos.length) return "Sem filhos cadastrados.";
     const partes = filhos.map((f) => {
-      if (f.idade != null) return `${f.nome} (${f.idade} ano${f.idade === 1 ? "" : "s"})`;
-      return f.nome;
+      const idade =
+        f.idade != null
+          ? ` (${f.idade} ano${f.idade === 1 ? "" : "s"})`
+          : f.dataNascimento && window.DiaconiaAniversarios?.formatarData
+            ? ` (nasc. ${window.DiaconiaAniversarios.formatarData(f.dataNascimento)})`
+            : "";
+      return `${f.nome}${idade}`;
     });
     const igreja = diacono?.filhosVaoIgreja ? " — vão à igreja" : "";
     return `${filhos.length} filho(s): ${partes.join(", ")}${igreja}.`;
@@ -653,20 +817,15 @@ window.DiaconiaUI = (() => {
     } = opts;
     const d = diacono || {};
     const listaMin = Array.isArray(ministerios) ? ministerios : [];
-    const minOpts = [
-      `<option value="">— Nenhum / só diaconia —</option>`,
-      ...listaMin
-        .filter((m) => m.ativo !== false || m.id === d.ministerioId)
-        .map((m) => {
-          const faixa =
-            m.horarioInicio && m.horarioFim ? ` (${m.horarioInicio}–${m.horarioFim})` : "";
-          return `<option value="${esc(m.id)}" ${d.ministerioId === m.id ? "selected" : ""}>${esc(m.nome)}${esc(faixa)}${m.ativo === false ? " (inativo)" : ""}</option>`;
-        }),
-    ].join("");
+    const nascDiac = d.dataNascimento || "";
+    const nascConj = d.conjugeDataNascimento || "";
 
     return `
       <label class="field"><span>Nome</span>
         <input id="${prefix}-nome" class="input" value="${esc(d.nome || "")}"/>
+      </label>
+      <label class="field"><span>Data de nascimento</span>
+        <input id="${prefix}-nascimento" class="input" type="date" value="${esc(nascDiac)}"/>
       </label>
       <label class="field"><span>WhatsApp (DD)</span>
         <input id="${prefix}-whatsapp" class="input" inputmode="tel" value="${esc(d.whatsapp || "")}" placeholder="Ex.: 47999990000"/>
@@ -676,13 +835,7 @@ window.DiaconiaUI = (() => {
           ? `<p class="muted" style="font-size:12px;margin:-6px 0 12px">Usado para pedidos de troca/cobertura.</p>`
           : ""
       }
-      <label class="field"><span>Ministério (outro serviço)</span>
-        <select id="${prefix}-ministerio-id" class="select">${minOpts}</select>
-      </label>
-      <p class="muted" style="font-size:12px;margin:-6px 0 8px">Se servir em outro ministério no culto, o gerador evita funções da diaconia no mesmo horário (pode servir antes ou depois).</p>
-      <label class="field"><span>Papel / observação no ministério (opcional)</span>
-        <input id="${prefix}-ministerio" class="input" value="${esc(d.funcaoMinisterio || "")}" placeholder="Ex.: professor, backvocal…"/>
-      </label>
+      ${ministeriosFormHtml(prefix, d, listaMin)}
       <div class="check-pair">
         <label class="field check-inline"><span><input type="checkbox" id="${prefix}-casado" ${d.casado ? "checked" : ""}/> ${esc(labelCasado)}</span></label>
         <label class="field check-inline" id="wrap-${prefix}-conjuge-membro"><span><input type="checkbox" id="${prefix}-conjuge-membro" ${d.conjugeMembroIgreja ? "checked" : ""}/> É membro da igreja</span></label>
@@ -690,42 +843,59 @@ window.DiaconiaUI = (() => {
       <label class="field" id="wrap-${prefix}-conjuge"><span>${esc(labelConjuge)}</span>
         <input id="${prefix}-conjuge" class="input" value="${esc(d.conjugeNome || "")}" placeholder="Nome do cônjuge"/>
       </label>
+      <label class="field" id="wrap-${prefix}-conjuge-nasc"><span>Data de nascimento do cônjuge</span>
+        <input id="${prefix}-conjuge-nasc" class="input" type="date" value="${esc(nascConj)}"/>
+      </label>
       ${filhosFormHtml(prefix, d, { labelTenho: labelFilhos })}
       <label class="field"><span>Restrições pessoais</span>
         <textarea id="${prefix}-restricao" class="textarea" rows="${prefix === "p" ? 4 : 3}" placeholder="Limitações ou observações…">${esc(d.restricaoPessoal || "")}</textarea>
       </label>`;
   }
 
-  function bindDadosPessoaisForm(root, prefix) {
+  function bindDadosPessoaisForm(root, prefix, opts = {}) {
     const syncCasado = () => {
       const on = !!root.querySelector(`#${prefix}-casado`)?.checked;
       const wrapConjuge = root.querySelector(`#wrap-${prefix}-conjuge`);
       const wrapMembro = root.querySelector(`#wrap-${prefix}-conjuge-membro`);
+      const wrapConjNasc = root.querySelector(`#wrap-${prefix}-conjuge-nasc`);
       if (wrapConjuge) wrapConjuge.style.display = on ? "" : "none";
       if (wrapMembro) wrapMembro.style.display = on ? "" : "none";
+      if (wrapConjNasc) wrapConjNasc.style.display = on ? "" : "none";
       if (!on) {
         const membro = root.querySelector(`#${prefix}-conjuge-membro`);
         if (membro) membro.checked = false;
+        const nascConj = root.querySelector(`#${prefix}-conjuge-nasc`);
+        if (nascConj) nascConj.value = "";
       }
     };
     root.querySelector(`#${prefix}-casado`)?.addEventListener("change", syncCasado);
     syncCasado();
     bindFilhosForm(root, prefix);
-    return { syncCasado };
+    const ministeriosBind = bindMinisteriosForm(root, prefix, opts.ministerios || [], opts.diacono);
+    return { syncCasado, ministeriosBind };
   }
 
   function lerDadosPessoaisForm(root, prefix) {
     const casado = !!root.querySelector(`#${prefix}-casado`)?.checked;
     const filhosData = lerFilhosForm(root, prefix);
+    const ministeriosData = lerMinisteriosForm(root, prefix);
     return {
       nome: root.querySelector(`#${prefix}-nome`)?.value.trim() || "",
+      dataNascimento:
+        window.DiaconiaAniversarios?.normalizarDataNascimento?.(
+          root.querySelector(`#${prefix}-nascimento`)?.value
+        ) || "",
       whatsapp: window.DiaconiaWhatsApp?.normalizarNumeroInternacional
         ? window.DiaconiaWhatsApp.normalizarNumeroInternacional(root.querySelector(`#${prefix}-whatsapp`)?.value)
         : String(root.querySelector(`#${prefix}-whatsapp`)?.value || "").replace(/\D/g, ""),
-      ministerioId: root.querySelector(`#${prefix}-ministerio-id`)?.value || "",
-      funcaoMinisterio: root.querySelector(`#${prefix}-ministerio`)?.value.trim() || "",
+      ...ministeriosData,
       casado,
       conjugeNome: casado ? root.querySelector(`#${prefix}-conjuge`)?.value.trim() || "" : "",
+      conjugeDataNascimento: casado
+        ? window.DiaconiaAniversarios?.normalizarDataNascimento?.(
+            root.querySelector(`#${prefix}-conjuge-nasc`)?.value
+          ) || ""
+        : "",
       conjugeMembroIgreja: casado && !!root.querySelector(`#${prefix}-conjuge-membro`)?.checked,
       restricaoPessoal: root.querySelector(`#${prefix}-restricao`)?.value.trim() || "",
       ...filhosData,
@@ -739,16 +909,26 @@ window.DiaconiaUI = (() => {
       return "WhatsApp inválido. Use DD + número (ex.: 47997845287).";
     }
     if (data.casado && !data.conjugeNome) return "Informe com quem é casado(a).";
+    const errMin = validarMinisteriosForm(data);
+    if (errMin) return errMin;
     return validarFilhosForm(data);
   }
 
   function aplicarDadosPessoais(diacono, data) {
     diacono.nome = data.nome;
+    diacono.dataNascimento = data.dataNascimento || "";
     diacono.whatsapp = data.whatsapp;
-    if (data.ministerioId !== undefined) diacono.ministerioId = data.ministerioId || "";
-    diacono.funcaoMinisterio = data.funcaoMinisterio;
+    if (Array.isArray(data.ministeriosServico)) {
+      diacono.ministeriosServico = data.ministeriosServico;
+      window.DiaconiaEngine?.syncMinisteriosLegacy?.(diacono);
+    } else {
+      if (data.ministerioId !== undefined) diacono.ministerioId = data.ministerioId || "";
+      diacono.funcaoMinisterio = data.funcaoMinisterio;
+      window.DiaconiaEngine?.syncMinisteriosLegacy?.(diacono);
+    }
     diacono.casado = data.casado;
     diacono.conjugeNome = data.conjugeNome;
+    diacono.conjugeDataNascimento = data.conjugeDataNascimento || "";
     diacono.conjugeMembroIgreja = data.conjugeMembroIgreja;
     diacono.restricaoPessoal = data.restricaoPessoal;
     aplicarFilhos(diacono, data);
@@ -763,6 +943,14 @@ window.DiaconiaUI = (() => {
 
     const linhas = [];
     linhas.push(`<dt>Nome</dt><dd>${esc(diacono.nome || "—")}</dd>`);
+    const nascTxt = diacono.dataNascimento
+      ? `${window.DiaconiaAniversarios?.formatarData?.(diacono.dataNascimento) || diacono.dataNascimento}${
+          window.DiaconiaAniversarios?.idadeDe?.(diacono.dataNascimento) != null
+            ? ` (${window.DiaconiaAniversarios.idadeDe(diacono.dataNascimento)} anos)`
+            : ""
+        }`
+      : `<span class="muted">Não informado</span>`;
+    linhas.push(`<dt>Data de nascimento</dt><dd>${nascTxt}</dd>`);
     linhas.push(
       `<dt>WhatsApp</dt><dd>${
         diacono.whatsapp
@@ -771,21 +959,41 @@ window.DiaconiaUI = (() => {
       }</dd>`
     );
     const stPreview = opts.state || { ministerios: opts.ministerios || [] };
-    const minLabel = [
-      diacono.ministerioId ? nomeMinisterio(stPreview, diacono.ministerioId) : "",
-      diacono.funcaoMinisterio || "",
-    ]
-      .filter(Boolean)
-      .join(" · ");
-    linhas.push(
-      `<dt>Ministério</dt><dd>${
-        minLabel ? esc(minLabel) : `<span class="muted">Não informado</span>`
-      }</dd>`
-    );
+    const Eng = window.DiaconiaEngine;
+    const mins = Eng?.normalizeMinisteriosServico?.(diacono) || [];
+    let minHtml;
+    if (mins.length) {
+      const linhasMin = mins
+        .map((item) => {
+          const nome = item.ministerioId ? nomeMinisterio(stPreview, item.ministerioId) : "";
+          const txt = [nome, item.funcaoMinisterio || ""].filter(Boolean).join(" · ");
+          return txt ? `<li>${esc(txt)}</li>` : "";
+        })
+        .filter(Boolean)
+        .join("");
+      minHtml = linhasMin
+        ? mins.length > 1
+          ? `<ul class="preview-list">${linhasMin}</ul>`
+          : esc([mins[0].ministerioId ? nomeMinisterio(stPreview, mins[0].ministerioId) : "", mins[0].funcaoMinisterio || ""].filter(Boolean).join(" · "))
+        : `<span class="muted">Não informado</span>`;
+    } else {
+      minHtml = `<span class="muted">Não informado</span>`;
+    }
+    linhas.push(`<dt>Ministério${mins.length > 1 ? "s" : ""}</dt><dd>${minHtml}</dd>`);
 
     if (diacono.casado) {
       let conj = esc(diacono.conjugeNome || "—");
       if (diacono.conjugeMembroIgreja) conj += ` <span class="badge badge-ok">Membro da igreja</span>`;
+      if (diacono.conjugeDataNascimento) {
+        conj += `<div class="muted" style="font-size:12px;margin-top:4px">Nasc.: ${esc(
+          window.DiaconiaAniversarios?.formatarData?.(diacono.conjugeDataNascimento) ||
+            diacono.conjugeDataNascimento
+        )}${
+          window.DiaconiaAniversarios?.idadeDe?.(diacono.conjugeDataNascimento) != null
+            ? ` (${window.DiaconiaAniversarios.idadeDe(diacono.conjugeDataNascimento)} anos)`
+            : ""
+        }</div>`;
+      }
       linhas.push(`<dt>Cônjuge</dt><dd>${conj}</dd>`);
     } else {
       linhas.push(`<dt>Estado civil</dt><dd><span class="muted">Não casado(a)</span></dd>`);
@@ -795,7 +1003,12 @@ window.DiaconiaUI = (() => {
     if (filhos.length) {
       const lista = filhos
         .map((f) => {
-          const idade = f.idade != null ? ` (${f.idade} ano${f.idade === 1 ? "" : "s"})` : "";
+          const idade =
+            f.idade != null
+              ? ` (${f.idade} ano${f.idade === 1 ? "" : "s"})`
+              : f.dataNascimento
+                ? ` (nasc. ${window.DiaconiaAniversarios?.formatarData?.(f.dataNascimento) || f.dataNascimento})`
+                : "";
           return `<li>${esc(f.nome)}${idade}</li>`;
         })
         .join("");
@@ -872,6 +1085,7 @@ window.DiaconiaUI = (() => {
     check: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>`,
     x: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
     refresh: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>`,
+    download: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`,
     "eye-off": `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/></svg>`,
   };
 

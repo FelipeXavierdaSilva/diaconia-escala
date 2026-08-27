@@ -60,6 +60,9 @@ window.DiaconiaApp = (() => {
       this.ano = this.state.meta?.anoPadrao || 2026;
       this.mes = this.state.meta?.mesAtual || 8;
 
+      const anivSync = window.DiaconiaAniversarios?.sincronizar?.(this.state);
+      if (anivSync?.dirty) window.DiaconiaStorage.save(this.state, { skipPush: true });
+
       this._stopSync?.();
       if (typeof window.DiaconiaStorage.startSync === "function") {
         this._stopSync = window.DiaconiaStorage.startSync((state) => {

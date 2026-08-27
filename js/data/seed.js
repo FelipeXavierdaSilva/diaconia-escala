@@ -427,6 +427,7 @@ window.DiaconiaSeed = (() => {
       relatosErro: [],
       ocorrencias: [],
       escalasArquivo: [],
+      backupsHistorico: [],
       configuracoes: {
         nomeIgreja: "Diaconia Viva",
         horarioPadrao: "18:00",
@@ -434,6 +435,10 @@ window.DiaconiaSeed = (() => {
         exigirAprovacaoTroca: false,
         respeitarCasais: true,
         umaEquipePorDia: true,
+        aniversarios: {
+          avisarLider: true,
+          publicarParaEquipe: false,
+        },
         whatsapp: {
           ativo: true,
           modo: "manual",

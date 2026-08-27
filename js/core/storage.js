@@ -60,6 +60,17 @@ window.DiaconiaStorage = (() => {
         .sort((a, b) => String(b.em || "").localeCompare(String(a.em || "")))
         .slice(0, 80);
     }
+    {
+      const limite = window.DiaconiaBackupHistorico?.LIMITE || 15;
+      const byId = new Map();
+      for (const item of [...(remote.backupsHistorico || []), ...(local.backupsHistorico || [])]) {
+        if (!item?.id || byId.has(item.id)) continue;
+        byId.set(item.id, item);
+      }
+      base.backupsHistorico = [...byId.values()]
+        .sort((a, b) => String(b.em || "").localeCompare(String(a.em || "")))
+        .slice(0, limite);
+    }
     return base;
   }
 
@@ -94,13 +105,21 @@ window.DiaconiaStorage = (() => {
     }
     for (const d of state.diaconos || []) {
       if (d.ministerioId === undefined) d.ministerioId = "";
+      if (!Array.isArray(d.ministeriosServico)) d.ministeriosServico = [];
       // Tenta vincular texto antigo ao catálogo (só se ainda não tiver id)
-      if (!d.ministerioId && d.funcaoMinisterio) {
+      if (!d.ministerioId && !d.ministeriosServico.length && d.funcaoMinisterio) {
         const txt = String(d.funcaoMinisterio).trim().toLowerCase();
         const hit = state.ministerios.find(
           (m) => m.ativo !== false && m.nome && txt.includes(String(m.nome).toLowerCase())
         );
         if (hit) d.ministerioId = hit.id;
+      }
+      if (typeof window.DiaconiaEngine?.syncMinisteriosLegacy === "function") {
+        window.DiaconiaEngine.syncMinisteriosLegacy(d);
+      } else if (!d.ministeriosServico.length && d.ministerioId) {
+        d.ministeriosServico = [
+          { ministerioId: d.ministerioId, funcaoMinisterio: d.funcaoMinisterio || "" },
+        ];
       }
     }
     if (!state.configuracoes) state.configuracoes = {};
@@ -323,21 +342,33 @@ window.DiaconiaStorage = (() => {
       if (d.casado === undefined) d.casado = false;
       if (d.conjugeNome === undefined) d.conjugeNome = "";
       if (d.conjugeMembroIgreja === undefined) d.conjugeMembroIgreja = false;
-      if (!d.casado) d.conjugeMembroIgreja = false;
+      if (d.dataNascimento === undefined) d.dataNascimento = "";
+      if (d.conjugeDataNascimento === undefined) d.conjugeDataNascimento = "";
+      if (!d.casado) {
+        d.conjugeMembroIgreja = false;
+        d.conjugeDataNascimento = "";
+      }
       if (!Array.isArray(d.filhosNomes)) d.filhosNomes = [];
       if (!Array.isArray(d.filhos)) {
         d.filhos = d.filhosNomes
           .map((n) => String(n || "").trim())
           .filter(Boolean)
-          .map((nome) => ({ nome, idade: null }));
+          .map((nome) => ({ nome, dataNascimento: "", idade: null }));
       } else {
         d.filhos = d.filhos.map((f) => ({
           nome: String(f?.nome ?? "").trim(),
+          dataNascimento: window.DiaconiaAniversarios?.normalizarDataNascimento?.(f?.dataNascimento) || "",
           idade:
             f?.idade === "" || f?.idade == null || Number.isNaN(Number(f.idade))
               ? null
               : Number(f.idade),
         }));
+        for (const f of d.filhos) {
+          if (f.dataNascimento && window.DiaconiaAniversarios?.idadeDe) {
+            const calc = window.DiaconiaAniversarios.idadeDe(f.dataNascimento);
+            if (calc != null) f.idade = calc;
+          }
+        }
       }
       d.filhosNomes = d.filhos.map((f) => f.nome).filter(Boolean);
       if (d.qtdFilhos === undefined) d.qtdFilhos = d.filhos.length;
@@ -359,6 +390,7 @@ window.DiaconiaStorage = (() => {
     if (!Array.isArray(state.ocorrencias)) state.ocorrencias = [];
     if (!Array.isArray(state.comunicados)) state.comunicados = [];
     if (!Array.isArray(state.escalasArquivo)) state.escalasArquivo = [];
+    if (!Array.isArray(state.backupsHistorico)) state.backupsHistorico = [];
     if (typeof window.DiaconiaWhatsApp?.ensure === "function") {
       window.DiaconiaWhatsApp.ensure(state);
     } else if (!state.configuracoes.whatsapp) {
@@ -379,6 +411,12 @@ window.DiaconiaStorage = (() => {
         apiUrl: "",
         apiToken: "",
       };
+    }
+
+    if (!state.meta) state.meta = {};
+    if (!state.meta.aniversariosProcessadosEm) state.meta.aniversariosProcessadosEm = "";
+    if (typeof window.DiaconiaAniversarios?.ensureCfg === "function") {
+      window.DiaconiaAniversarios.ensureCfg(state);
     }
 
     return state;
@@ -651,6 +689,7 @@ window.DiaconiaStorage = (() => {
     pushRemote,
     saveAndSync,
     mergeUsuarioLists,
+    mergeStates,
     touchUsuario,
     startSync,
     buildBackup,

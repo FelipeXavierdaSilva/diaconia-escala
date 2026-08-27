@@ -1548,7 +1548,10 @@ window.DiaconiaViewsDiacono = (() => {
   }
 
   function bindConta(app, root) {
-    UI().bindDadosPessoaisForm(root, "p");
+    const { state } = app;
+    const sessao = window.DiaconiaAuth.sessao();
+    const d = state.diaconos.find((x) => x.id === sessao?.diaconoId);
+    UI().bindDadosPessoaisForm(root, "p", { ministerios: state.ministerios || [], diacono: d });
     UI().bindPasswordToggles(root);
 
     root.querySelector("#btn-save-perfil")?.addEventListener("click", async () => {
@@ -1589,6 +1592,7 @@ window.DiaconiaViewsDiacono = (() => {
         meta: { diaconoId: d.id },
       });
 
+      window.DiaconiaAniversarios?.sincronizar?.(state);
       const sync = await app.saveAndSync();
       app.render();
       if (senha && sync?.ok) {
@@ -1614,21 +1618,11 @@ window.DiaconiaViewsDiacono = (() => {
       usuarioId: sessao?.usuarioId,
       sessao,
     });
-    const datas = Ocr.datasCultoOpcoes(state);
     const hoje = Cal().hojeISO();
-    const dataPadrao = datas.find((d) => d <= hoje) || datas[0] || hoje;
 
     const tiposOpts = (Ocr.TIPOS || [])
       .map((t) => `<option value="${t.id}">${UI().esc(t.label)}</option>`)
       .join("");
-    const datasOpts = datas.length
-      ? datas
-          .map(
-            (d) =>
-              `<option value="${d}" ${d === dataPadrao ? "selected" : ""}>${UI().esc(Cal().diaSemana(d) + " — " + Cal().formatBR(d))}</option>`
-          )
-          .join("")
-      : `<option value="${hoje}">${UI().esc(Cal().formatBR(hoje))}</option>`;
 
     const rows = lista
       .map((o) => {
@@ -1660,8 +1654,9 @@ window.DiaconiaViewsDiacono = (() => {
       <div class="panel" style="margin-bottom:16px">
         <h2 style="margin-top:0">Relatar ocorrência</h2>
         <div class="grid grid-2">
-          <label class="field"><span>Data do culto</span>
-            <select id="ocr-data" class="select">${datasOpts}</select>
+          <label class="field"><span>Data</span>
+            <input type="date" id="ocr-data" class="input" value="${UI().esc(hoje)}"/>
+            <span class="muted" style="font-size:12px">Qualquer dia — culto ou não.</span>
           </label>
           <label class="field"><span>Tipo</span>
             <select id="ocr-tipo" class="select">${tiposOpts}</select>

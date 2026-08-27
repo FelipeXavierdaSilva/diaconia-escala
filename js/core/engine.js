@@ -36,19 +36,58 @@ window.DiaconiaEngine = (() => {
     return (state.ministerios || []).find((m) => m.id === id) || null;
   }
 
-  /** Ministério ativo do diácono (com horário). */
-  function ministerioDoDiacono(state, diacono) {
-    if (!diacono?.ministerioId) return null;
-    const m = getMinisterio(state, diacono.ministerioId);
-    return m && m.ativo !== false ? m : null;
+  /** Lista de ministérios em que o diácono serve (outro serviço no culto). */
+  function normalizeMinisteriosServico(diacono) {
+    if (!diacono) return [];
+    if (Array.isArray(diacono.ministeriosServico) && diacono.ministeriosServico.length) {
+      return diacono.ministeriosServico
+        .filter((x) => x?.ministerioId)
+        .map((x) => ({
+          ministerioId: x.ministerioId,
+          funcaoMinisterio: String(x.funcaoMinisterio || "").trim(),
+        }));
+    }
+    if (diacono.ministerioId) {
+      return [
+        {
+          ministerioId: diacono.ministerioId,
+          funcaoMinisterio: String(diacono.funcaoMinisterio || "").trim(),
+        },
+      ];
+    }
+    return [];
   }
 
-  /** True se o horário da função da diaconia conflita com o ministério do diácono. */
+  /** Mantém ministerioId/funcaoMinisterio legados alinhados ao primeiro item. */
+  function syncMinisteriosLegacy(diacono) {
+    if (!diacono) return;
+    const list = normalizeMinisteriosServico(diacono);
+    diacono.ministeriosServico = list;
+    diacono.ministerioId = list[0]?.ministerioId || "";
+    diacono.funcaoMinisterio = list[0]?.funcaoMinisterio || "";
+  }
+
+  /** Ministérios ativos do diácono (com horário). */
+  function ministeriosDoDiacono(state, diacono) {
+    return normalizeMinisteriosServico(diacono)
+      .map((item) => getMinisterio(state, item.ministerioId))
+      .filter((m) => m && m.ativo !== false);
+  }
+
+  /** Ministério ativo do diácono (com horário) — primeiro da lista. */
+  function ministerioDoDiacono(state, diacono) {
+    const list = ministeriosDoDiacono(state, diacono);
+    return list[0] || null;
+  }
+
+  /** True se o horário da função da diaconia conflita com algum ministério do diácono. */
   function conflitoHorarioMinisterio(state, diacono, funcao) {
     if (state.configuracoes?.geracao?.respeitarHorarioMinisterio === false) return false;
-    const m = ministerioDoDiacono(state, diacono);
-    if (!m || !funcao) return false;
-    return Cal().horarioConflitaComJanela(funcao.horario, m.horarioInicio, m.horarioFim);
+    if (!funcao) return false;
+    for (const m of ministeriosDoDiacono(state, diacono)) {
+      if (Cal().horarioConflitaComJanela(funcao.horario, m.horarioInicio, m.horarioFim)) return true;
+    }
+    return false;
   }
 
   function diaconosDaEquipe(state, equipeId) {
@@ -493,7 +532,7 @@ window.DiaconiaEngine = (() => {
       score += (histMes[d.id] || 0) * 0.5;
       if (usados.has(d.id)) score += 20; // preferir quem ainda não foi escalado hoje
       // Quem tem outro ministério: leve prioridade menor (não sobrecarregar quem só está na diaconia)
-      if (cfg.priorizarSemMinisterio && ministerioDoDiacono(state, d)) score += 2.5;
+      if (cfg.priorizarSemMinisterio && ministeriosDoDiacono(state, d).length) score += 2.5;
       return score;
     }
 
@@ -1535,6 +1574,9 @@ window.DiaconiaEngine = (() => {
     getFuncao,
     qtdFuncaoNaEscala,
     getMinisterio,
+    normalizeMinisteriosServico,
+    syncMinisteriosLegacy,
+    ministeriosDoDiacono,
     ministerioDoDiacono,
     conflitoHorarioMinisterio,
     diaconosDaEquipe,

@@ -120,7 +120,7 @@ window.DiaconiaOcorrencias = (() => {
     const data = String(payload.data || "").trim();
     const titulo = String(payload.titulo || "").trim();
     const descricao = String(payload.descricao || "").trim();
-    if (!data) return { ok: false, erro: "Selecione a data do culto." };
+    if (!data) return { ok: false, erro: "Selecione a data." };
     if (!titulo) return { ok: false, erro: "Informe um título curto." };
     if (descricao.length < 5) {
       return { ok: false, erro: "Descreva o que aconteceu no culto (pelo menos algumas palavras)." };

@@ -150,12 +150,15 @@ window.DiaconiaViewsLider = (() => {
       equipeId: equipePadrao(state),
       funcaoMinisterio: "",
       ministerioId: "",
+      ministeriosServico: [],
       funcaoDiaconatoId: "",
       whatsapp: waDigits(whatsapp),
       restricaoPessoal: "",
       casado: false,
       conjugeNome: "",
+      conjugeDataNascimento: "",
       conjugeMembroIgreja: false,
+      dataNascimento: "",
       temFilhos: false,
       qtdFilhos: 0,
       filhos: [],
@@ -990,7 +993,7 @@ window.DiaconiaViewsLider = (() => {
     };
     root.querySelector("#d-all").addEventListener("change", sync);
     sync();
-    UI().bindDadosPessoaisForm(root, "d");
+    UI().bindDadosPessoaisForm(root, "d", { ministerios: state.ministerios || [], diacono });
 
     root.addEventListener("click", async (e) => {
       const act = e.target.closest("[data-act]")?.dataset.act;
@@ -1061,6 +1064,7 @@ window.DiaconiaViewsLider = (() => {
           mensagem: `Usuário criado automaticamente: ${novoUsuario.login} (diácono).`,
           usuarioId: ctx(app).sessao()?.usuarioId,
         });
+        window.DiaconiaAniversarios?.sincronizar?.(state);
         const sync = await app.saveAndSync();
         const wa = window.DiaconiaWhatsApp?.notificarCadastroUsuario?.(state, novoUsuario, {
           senha: senhaPadrao,
@@ -1076,6 +1080,7 @@ window.DiaconiaViewsLider = (() => {
         toastWhatsappCadastro(wa);
         return;
       }
+      window.DiaconiaAniversarios?.sincronizar?.(state);
       app.save();
       UI().closeModal();
       app.render();
@@ -2733,6 +2738,57 @@ window.DiaconiaViewsLider = (() => {
     return `${fmt(list[0])} a ${fmt(list[list.length - 1])}`;
   }
 
+  function resumoBackupChips(resumo) {
+    const r = resumo || {};
+    return `<span class="chip">${r.escalas ?? 0} escalas</span>
+      <span class="chip">${r.diaconos ?? 0} diáconos</span>
+      <span class="chip">${r.restricoes ?? 0} restrições</span>
+      <span class="chip">${r.trocas ?? 0} trocas</span>`;
+  }
+
+  function backupHistoricoHtml(app) {
+    const { state } = ctx(app);
+    const Bh = window.DiaconiaBackupHistorico;
+    Bh?.ensure?.(state);
+    const lista = Bh?.listar?.(state) || state.backupsHistorico || [];
+    const limite = Bh?.LIMITE || 15;
+    const rows = lista
+      .map((item) => {
+        const info = Bh?.motivoInfo?.(item.motivo) || { texto: item.motivo || "Backup", tom: "muted" };
+        const quem = item.usuarioNome || nomeUsuarioHist(state, item.usuarioId);
+        const obs = item.observacao
+          ? `<div class="muted" style="font-size:12px;margin-top:4px">${UI().esc(item.observacao)}</div>`
+          : "";
+        return `<tr class="no-click">
+          <td>${UI().esc(item.em ? new Date(item.em).toLocaleString("pt-BR") : "—")}</td>
+          <td><span class="badge badge-${info.tom}">${UI().esc(info.texto)}</span></td>
+          <td><div class="chips" style="flex-wrap:wrap">${resumoBackupChips(item.resumo)}</div>${obs}</td>
+          <td>${UI().esc(quem)}</td>
+          <td>
+            <div class="toolbar">
+              ${UI().btnIcon({ icon: "download", label: "Baixar", variant: "ghost", attrs: { "data-act": "bhst-dl", "data-id": item.id } })}
+              ${UI().btnIcon({ icon: "refresh", label: "Restaurar", variant: "accent", attrs: { "data-act": "bhst-rest", "data-id": item.id } })}
+              ${UI().btnIcon({ icon: "trash", label: "Excluir", variant: "danger", attrs: { "data-act": "bhst-del", "data-id": item.id } })}
+            </div>
+          </td>
+        </tr>`;
+      })
+      .join("");
+
+    return `
+      <div class="settings-pane-sub" style="margin-top:20px">
+        <h3 style="margin:0 0 6px">Histórico compartilhado</h3>
+        <p class="muted" style="margin:0 0 12px">Até <strong>${limite}</strong> cópias completas visíveis para todos os líderes. Se o servidor estiver ativo, o histórico sincroniza entre dispositivos.</p>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Quando</th><th>Motivo</th><th>Conteúdo</th><th>Quem</th><th>Ações</th></tr></thead>
+          <tbody>${
+            rows ||
+            `<tr class="no-click"><td colspan="5" class="empty">Nenhuma cópia no histórico. Use <strong>Guardar no histórico</strong> antes de mudanças grandes ou após aprovar restrições/trocas.</td></tr>`
+          }</tbody>
+        </table></div>
+      </div>`;
+  }
+
   function historicoArquivoHtml(app) {
     const { state } = ctx(app);
     const Arq = window.DiaconiaEscalaArquivo;
@@ -3193,6 +3249,7 @@ window.DiaconiaViewsLider = (() => {
   function configuracoes(app) {
     const { state } = ctx(app);
     const cfg = state.configuracoes || {};
+    const aniv = window.DiaconiaAniversarios?.ensureCfg?.(state) || cfg.aniversarios || {};
     const lideres = (state.lideres || [])
       .map(
         (l) => `
@@ -3269,6 +3326,16 @@ window.DiaconiaViewsLider = (() => {
             <label class="field"><span>Nome da igreja</span><input id="cfg-igreja" value="${UI().esc(cfg.nomeIgreja || "")}"/></label>
             <label class="field"><span>Horário padrão do culto</span><input id="cfg-hora" value="${UI().esc(cfg.horarioPadrao || "18:00")}"/></label>
             <label class="field"><span><input type="checkbox" id="cfg-rest" ${cfg.exigirAprovacaoRestricao !== false ? "checked" : ""}/> Exigir aprovação de restrições (“Não posso ir”)</span></label>
+            <div class="settings-subsection" style="margin-top:18px">
+              <h3 style="margin:0 0 8px;font-size:15px">Aniversários</h3>
+              <p class="muted settings-hint" style="margin:0 0 12px">Cadastre datas de nascimento em Minha conta ou em Diáconos. A tarja pública menciona <strong>somente o diácono</strong>; cônjuge e filhos aparecem só no aviso da liderança.</p>
+              <div class="panel" style="padding:12px 14px;margin-bottom:12px;background:var(--surface-2, rgba(0,0,0,.02))">
+                <strong style="font-size:13px">Hoje</strong>
+                ${window.DiaconiaAniversarios?.resumoHojeHtml?.(state) || ""}
+              </div>
+              <label class="field"><span><input type="checkbox" id="cfg-aniv-lider" ${aniv.avisarLider !== false ? "checked" : ""}/> Avisar liderança sobre aniversários do dia (diácono, cônjuge e filhos)</span></label>
+              <label class="field"><span><input type="checkbox" id="cfg-aniv-publico" ${aniv.publicarParaEquipe ? "checked" : ""}/> Publicar aniversário do diácono na tarja para todos</span></label>
+            </div>
             <p class="muted settings-hint">Modelo atual: <strong>1 equipe por dia</strong>. Rodízio, casais e ministérios ficam em <em>Regras da escala</em>.</p>
             <div class="toolbar">
               <button type="button" class="btn btn-accent" id="btn-save-cfg">Salvar geral</button>
@@ -3539,7 +3606,7 @@ window.DiaconiaViewsLider = (() => {
           <section class="settings-pane panel" data-settings-pane="backup" ${tab === "backup" ? "" : "hidden"}>
             <div class="settings-pane-head">
               <h2>Backup e restauração</h2>
-              <p class="muted">Arquivo JSON com escalas, diáconos, restrições, trocas e configurações.</p>
+              <p class="muted">Arquivo JSON com escalas, diáconos, restrições, trocas e configurações. O histórico abaixo fica disponível para todos os líderes.</p>
             </div>
             <div class="chips">
               <span class="chip">${qEscalas} escalas</span>
@@ -3548,14 +3615,17 @@ window.DiaconiaViewsLider = (() => {
               <span class="chip">${(state.trocas || []).length} trocas</span>
             </div>
             <div class="toolbar">
-              <button type="button" class="btn btn-primary" id="btn-backup-export">Baixar backup</button>
-              <button type="button" class="btn btn-accent" id="btn-backup-import">Restaurar backup</button>
+              <button type="button" class="btn btn-primary" id="btn-backup-guardar-hist">Guardar no histórico</button>
+              <button type="button" class="btn btn-accent" id="btn-backup-export">Baixar arquivo</button>
+              <button type="button" class="btn btn-ghost" id="btn-backup-import">Restaurar de arquivo</button>
               <input type="file" id="backup-file" accept=".json,application/json" class="hidden"/>
             </div>
+            <label class="field" style="margin-top:8px"><span><input type="checkbox" id="backup-export-hist" checked/> Ao baixar arquivo, incluir também no histórico compartilhado</span></label>
             <div class="alert alert-info">
               <strong>Dica:</strong> faça backup antes de gerar o ano ou após aprovar restrições/trocas.
-              A restauração <strong>substitui todos os dados atuais</strong> pelos do arquivo.
+              Restaurar (do histórico ou de arquivo) <strong>substitui todos os dados atuais</strong>, mas guarda uma cópia automática antes.
             </div>
+            ${backupHistoricoHtml(app)}
           </section>
         </div>
       </div>`;
@@ -3620,6 +3690,10 @@ window.DiaconiaViewsLider = (() => {
       state.configuracoes.horarioPadrao = root.querySelector("#cfg-hora").value;
       state.configuracoes.exigirAprovacaoRestricao = root.querySelector("#cfg-rest").checked;
       state.configuracoes.exigirAprovacaoTroca = false;
+      if (!state.configuracoes.aniversarios) state.configuracoes.aniversarios = {};
+      state.configuracoes.aniversarios.avisarLider = !!root.querySelector("#cfg-aniv-lider")?.checked;
+      state.configuracoes.aniversarios.publicarParaEquipe = !!root.querySelector("#cfg-aniv-publico")?.checked;
+      window.DiaconiaAniversarios?.sincronizar?.(state);
       app.save();
       UI().toast("Configurações gerais salvas.");
     });
@@ -3692,6 +3766,10 @@ window.DiaconiaViewsLider = (() => {
         state.ministerios = (state.ministerios || []).filter((x) => x.id !== m.id);
         for (const d of state.diaconos || []) {
           if (d.ministerioId === m.id) d.ministerioId = "";
+          if (Array.isArray(d.ministeriosServico)) {
+            d.ministeriosServico = d.ministeriosServico.filter((x) => x.ministerioId !== m.id);
+          }
+          window.DiaconiaEngine?.syncMinisteriosLegacy?.(d);
         }
         window.DiaconiaHistory.add(state, {
           tipo: "config",
@@ -3938,15 +4016,138 @@ window.DiaconiaViewsLider = (() => {
 
     root.querySelector("#btn-backup-export")?.addEventListener("click", () => {
       app.save();
+      const Bh = window.DiaconiaBackupHistorico;
+      const sessao = ctx(app).sessao();
+      if (root.querySelector("#backup-export-hist")?.checked && Bh) {
+        const g = Bh.guardar(app.state, {
+          motivo: "exportacao",
+          observacao: "Cópia ao baixar arquivo.",
+          usuarioId: sessao?.usuarioId,
+          usuarioNome: sessao?.nome,
+        });
+        if (g.ok) {
+          window.DiaconiaHistory.add(app.state, {
+            tipo: "backup",
+            mensagem: "Cópia guardada no histórico compartilhado (exportação).",
+            usuarioId: sessao?.usuarioId,
+          });
+        }
+      }
       const res = window.DiaconiaStorage.downloadBackup(app.state);
       if (res.ok) {
         window.DiaconiaHistory.add(app.state, {
           tipo: "backup",
           mensagem: `Backup exportado: ${res.nome}`,
-          usuarioId: ctx(app).sessao()?.usuarioId,
+          usuarioId: sessao?.usuarioId,
         });
         app.save();
         UI().toast(`Backup baixado: ${res.nome}`);
+        app.render();
+      }
+    });
+
+    root.querySelector("#btn-backup-guardar-hist")?.addEventListener("click", async () => {
+      const Bh = window.DiaconiaBackupHistorico;
+      if (!Bh) {
+        UI().toast("Serviço de histórico indisponível.");
+        return;
+      }
+      UI().openModal(`
+        <h2>Guardar no histórico</h2>
+        <p class="muted">Uma cópia completa ficará disponível para todos os líderes (até ${Bh.LIMITE} entradas).</p>
+        <label class="field"><span>Observação (opcional)</span>
+          <input id="bhst-obs" placeholder="Ex.: Antes de gerar setembro"/></label>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
+          <button class="btn btn-primary" data-act="save">Guardar cópia</button>
+        </div>`);
+      const modal = document.querySelector(".modal-overlay");
+      modal?.querySelector('[data-act="cancel"]')?.addEventListener("click", () => UI().closeModal());
+      modal?.querySelector('[data-act="save"]')?.addEventListener("click", () => {
+        const obs = modal.querySelector("#bhst-obs")?.value || "";
+        const sessao = ctx(app).sessao();
+        app.save();
+        const g = Bh.guardar(app.state, {
+          motivo: "manual",
+          observacao: obs,
+          usuarioId: sessao?.usuarioId,
+          usuarioNome: sessao?.nome,
+        });
+        UI().closeModal();
+        if (!g.ok) {
+          UI().toast(g.erro || "Não foi possível guardar.");
+          return;
+        }
+        window.DiaconiaHistory.add(app.state, {
+          tipo: "backup",
+          mensagem: obs ? `Backup no histórico: ${obs}` : "Backup guardado no histórico compartilhado.",
+          usuarioId: sessao?.usuarioId,
+        });
+        app.save();
+        UI().toast("Cópia guardada no histórico.");
+        app.render();
+      });
+    });
+
+    root.querySelector("[data-settings-pane=backup]")?.addEventListener("click", async (ev) => {
+      const btn = ev.target.closest("[data-act]");
+      if (!btn) return;
+      const act = btn.dataset.act;
+      const id = btn.dataset.id;
+      const Bh = window.DiaconiaBackupHistorico;
+      if (!Bh || !id) return;
+      const item = Bh.get(app.state, id);
+      if (!item && act !== "bhst-del") return;
+
+      if (act === "bhst-dl") {
+        const res = Bh.downloadItem(app.state, id);
+        UI().toast(res.ok ? `Arquivo baixado: ${res.nome}` : res.erro || "Falha ao baixar.");
+        return;
+      }
+
+      if (act === "bhst-del") {
+        const ok = await UI().confirmModal({
+          title: "Excluir cópia do histórico",
+          body: `<p>Remover esta entrada do histórico compartilhado?</p><p class="muted">Os dados atuais do sistema não são alterados.</p>`,
+          okText: "Excluir",
+          danger: true,
+        });
+        if (!ok) return;
+        Bh.excluir(app.state, id);
+        app.save();
+        UI().toast("Cópia removida do histórico.");
+        app.render();
+        return;
+      }
+
+      if (act === "bhst-rest") {
+        const quando = item.em ? new Date(item.em).toLocaleString("pt-BR") : "data desconhecida";
+        const quem = item.usuarioNome || nomeUsuarioHist(app.state, item.usuarioId);
+        const ok = await UI().confirmModal({
+          title: "Restaurar do histórico",
+          body: `<p>Cópia de: <strong>${UI().esc(quando)}</strong></p>
+            <p>Guardada por: <strong>${UI().esc(quem)}</strong></p>
+            ${item.observacao ? `<p>Observação: ${UI().esc(item.observacao)}</p>` : ""}
+            <div class="chips" style="margin:8px 0">${resumoBackupChips(item.resumo)}</div>
+            <div class="alert alert-warn">Todos os dados atuais serão substituídos. Uma cópia de segurança será guardada automaticamente antes.</div>`,
+          okText: "Restaurar agora",
+          danger: true,
+        });
+        if (!ok) return;
+        const sessao = ctx(app).sessao();
+        const res = Bh.restaurar(app.state, id, {
+          usuarioId: sessao?.usuarioId,
+          usuarioNome: sessao?.nome,
+        });
+        if (!res.ok) {
+          UI().toast(res.erro || "Falha ao restaurar.");
+          return;
+        }
+        app.save();
+        app.ano = app.state.meta?.anoPadrao || 2026;
+        app.mes = app.state.meta?.mesAtual || 8;
+        app.render();
+        UI().toast("Backup restaurado do histórico.");
       }
     });
 
@@ -3980,11 +4181,22 @@ window.DiaconiaViewsLider = (() => {
         title: "Restaurar backup",
         body: `<p>Arquivo: <strong>${UI().esc(file.name)}</strong></p>
           <p>Exportado em: <strong>${UI().esc(quando)}</strong></p>
-          <div class="alert alert-warn">Todos os dados atuais serão substituídos. Esta ação não pode ser desfeita (exceto com outro backup).</div>`,
+          <div class="alert alert-warn">Todos os dados atuais serão substituídos. Uma cópia de segurança será guardada no histórico antes.</div>`,
         okText: "Restaurar agora",
         danger: true,
       });
       if (!ok) return;
+
+      const Bh = window.DiaconiaBackupHistorico;
+      const sessao = ctx(app).sessao();
+      if (Bh) {
+        Bh.guardarAntesRestaurar(app.state, {
+          usuarioId: sessao?.usuarioId,
+          usuarioNome: sessao?.nome,
+          origem: file.name,
+        });
+      }
+      const historico = [...(app.state.backupsHistorico || [])];
 
       const restored = window.DiaconiaStorage.restoreBackup(parsed.state);
       if (!restored.ok) {
@@ -3992,6 +4204,7 @@ window.DiaconiaViewsLider = (() => {
         return;
       }
 
+      restored.state.backupsHistorico = historico;
       app.state = restored.state;
       window.DiaconiaHistory.add(app.state, {
         tipo: "backup",
@@ -4231,20 +4444,10 @@ window.DiaconiaViewsLider = (() => {
     const filtro = app.filtroOcrStatus || "";
     const lista = Ocr.listar(state, { status: filtro || undefined, sessao });
     const pend = (lista || []).filter((o) => o.status === "registrada" || o.status === "em_providencia").length;
-    const datas = Ocr.datasCultoOpcoes(state);
     const hoje = Cal().hojeISO();
-    const dataPadrao = datas.find((d) => d <= hoje) || datas[0] || hoje;
     const tiposOpts = (Ocr.TIPOS || [])
       .map((t) => `<option value="${t.id}">${UI().esc(t.label)}</option>`)
       .join("");
-    const datasOpts = datas.length
-      ? datas
-          .map(
-            (d) =>
-              `<option value="${d}" ${d === dataPadrao ? "selected" : ""}>${UI().esc(Cal().diaSemana(d) + " — " + Cal().formatBR(d))}</option>`
-          )
-          .join("")
-      : `<option value="${hoje}">${UI().esc(Cal().formatBR(hoje))}</option>`;
 
     const rows = lista
       .map((o) => {
@@ -4282,8 +4485,9 @@ window.DiaconiaViewsLider = (() => {
       <div class="panel" style="margin-bottom:16px">
         <h2 style="margin-top:0">Registrar ocorrência</h2>
         <div class="grid grid-2">
-          <label class="field"><span>Data do culto</span>
-            <select id="ocr-data" class="select">${datasOpts}</select>
+          <label class="field"><span>Data</span>
+            <input type="date" id="ocr-data" class="input" value="${UI().esc(hoje)}"/>
+            <span class="muted" style="font-size:12px">Qualquer dia — culto ou não.</span>
           </label>
           <label class="field"><span>Tipo</span>
             <select id="ocr-tipo" class="select">${tiposOpts}</select>

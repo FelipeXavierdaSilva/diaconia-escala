@@ -247,6 +247,35 @@ code {
   margin-bottom: 10px;
 }
 
+.ministerios-extra-block {
+  margin: 4px 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2, rgba(0, 0, 0, 0.02));
+}
+
+.ministerios-extra-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ministerio-row-extra {
+  padding-top: 4px;
+  border-top: 1px dashed var(--line);
+}
+
+.ministerio-row-extra:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.ministerio-row-extra .min-rem {
+  margin-top: 2px;
+}
+
 .check-pair {
   display: flex;
   flex-wrap: wrap;
@@ -268,7 +297,7 @@ code {
 
 .filho-row {
   display: grid;
-  grid-template-columns: 1fr 110px;
+  grid-template-columns: 1fr minmax(150px, 190px);
   gap: 10px;
   align-items: start;
 }
